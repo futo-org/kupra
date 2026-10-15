@@ -1,0 +1,296 @@
+apiVersion: kupra.futo.tech/v1alpha1
+kind: PreviewApp
+metadata:
+  name: zulip
+spec:
+  parameters:
+    - name: tag
+      title: Image tag
+      default: "12.2-0"
+      uiHint:
+        type: imageTag
+        repository: ghcr.io/zulip/zulip-server
+
+  variables:
+    - name: host
+      expression: preview.name + ".zulip.preview.example.com"
+
+  links:
+    - name: Web
+      urlExpr: '"https://" + variables.host'
+
+  template:
+    secrets:
+      - name: zulip-db-credentials
+        type: kubernetes.io/basic-auth
+        data:
+          username: zulip
+        generate: [password]
+      - name: zulip-secrets
+        generate: [secret-key, avatar-salt]
+      - name: zulip-dragonfly
+        generate: [password]
+
+    resources:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        metadata:
+          name: database
+        spec:
+          instances: 1
+          bootstrap:
+            initdb:
+              database: zulip
+              owner: zulip
+              secret:
+                name: zulip-db-credentials
+              localeCollate: C.UTF-8
+              localeCType: C.UTF-8
+          storage:
+            size: 10Gi
+
+      - apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: zulip-oidc
+        spec:
+          secretStoreRef:
+            kind: ClusterSecretStore
+            name: default
+          target:
+            name: zulip-oidc
+          data:
+            - secretKey: client-id
+              remoteRef:
+                key: ZULIP_PREVIEW_OIDC_CLIENT_ID
+            - secretKey: client-secret
+              remoteRef:
+                key: ZULIP_PREVIEW_OIDC_CLIENT_SECRET
+
+      - apiVersion: dragonflydb.io/v1alpha1
+        kind: Dragonfly
+        metadata:
+          name: zulip-dragonfly
+        spec:
+          replicas: 1
+          args:
+            - --maxmemory=384mb
+            - --proactor_threads=1
+          authentication:
+            passwordFromSecret:
+              name: zulip-dragonfly
+              key: password
+
+      - apiVersion: rabbitmq.com/v1beta1
+        kind: RabbitmqCluster
+        metadata:
+          name: zulip-rabbitmq
+        spec:
+          replicas: 1
+          persistence:
+            storage: 2Gi
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: zulip-memcached
+        spec:
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: zulip-memcached
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: zulip-memcached
+            spec:
+              containers:
+                - name: memcached
+                  image: docker.io/library/memcached:1.6-alpine
+                  args: ["-m", "256", "-I", "1m"]
+                  ports:
+                    - name: memcached
+                      containerPort: 11211
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: zulip-memcached
+        spec:
+          selector:
+            app.kubernetes.io/name: zulip-memcached
+          ports:
+            - name: memcached
+              port: 11211
+              targetPort: memcached
+
+      - apiVersion: apps/v1
+        kind: StatefulSet
+        metadata:
+          name: zulip
+        spec:
+          serviceName: zulip
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: zulip
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: zulip
+            spec:
+              containers:
+                - name: zulip
+                  imageExpr: '"ghcr.io/zulip/zulip-server:" + params.tag'
+                  env:
+                    - name: SETTING_EXTERNAL_HOST
+                      valueExpr: variables.host
+                    - name: SETTING_ZULIP_ADMINISTRATOR
+                      value: admin@example.com
+                    - name: LOADBALANCER_IPS
+                      value: 10.0.0.0/8
+                    - name: CERTIFICATES
+                      value: ""
+
+                    - name: SETTING_REMOTE_POSTGRES_HOST
+                      value: database-rw
+                    - name: SETTING_REMOTE_POSTGRES_SSLMODE
+                      value: require
+                    - name: CONFIG_postgresql__database_user
+                      value: zulip
+                    - name: CONFIG_postgresql__database_name
+                      value: zulip
+                    - name: SECRETS_postgres_password
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-db-credentials
+                          key: password
+
+                    - name: SETTING_RABBITMQ_HOST
+                      value: zulip-rabbitmq
+                    - name: SETTING_RABBITMQ_USERNAME
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-rabbitmq-default-user
+                          key: username
+                    - name: SECRETS_rabbitmq_password
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-rabbitmq-default-user
+                          key: password
+                    - name: SETTING_REDIS_HOST
+                      value: zulip-dragonfly
+                    - name: SECRETS_redis_password
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-dragonfly
+                          key: password
+                    - name: SETTING_MEMCACHED_LOCATION
+                      value: zulip-memcached:11211
+
+                    - name: ZULIP_AUTH_BACKENDS
+                      value: GenericOpenIdConnectBackend
+                    - name: SETTING_SOCIAL_AUTH_OIDC_ENABLED_IDPS
+                      value: |
+                        {
+                            "sso": {
+                                "oidc_url": "https://auth.example.com",
+                                "display_name": "SSO",
+                                "display_icon": None,
+                                "client_id": get_secret("social_auth_oidc_client_id"),
+                                "secret": get_secret("social_auth_oidc_secret"),
+                                "auto_signup": True,
+                            },
+                        }
+                    - name: SECRETS_social_auth_oidc_client_id
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-oidc
+                          key: client-id
+                    - name: SECRETS_social_auth_oidc_secret
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-oidc
+                          key: client-secret
+
+                    - name: SECRETS_secret_key
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-secrets
+                          key: secret-key
+                    - name: SECRETS_avatar_salt
+                      valueFrom:
+                        secretKeyRef:
+                          name: zulip-secrets
+                          key: avatar-salt
+
+                    - name: CONFIG_application_server__queue_workers_multiprocess
+                      value: "false"
+                  ports:
+                    - name: http
+                      containerPort: 80
+                  startupProbe:
+                    exec:
+                      command: [curl, --silent, --fail, --max-time, "5", http://127.0.0.1/health]
+                    periodSeconds: 10
+                    failureThreshold: 90
+                    timeoutSeconds: 6
+                  readinessProbe:
+                    exec:
+                      command: [curl, --silent, --fail, --max-time, "5", http://127.0.0.1/health]
+                    periodSeconds: 15
+                    timeoutSeconds: 6
+                  volumeMounts:
+                    - name: data
+                      mountPath: /data
+          volumeClaimTemplates:
+            - metadata:
+                name: data
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 10Gi
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: zulip
+        spec:
+          selector:
+            app.kubernetes.io/name: zulip
+          ports:
+            - name: http
+              port: 80
+              targetPort: http
+
+      - apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: web
+        spec:
+          parentRefs:
+            - name: previews
+              namespace: gateway-system
+          hostnamesExpr: '[variables.host]'
+          rules:
+            - backendRefs:
+                - name: zulip
+                  port: 80
+---
+apiVersion: kupra.futo.tech/v1alpha1
+kind: Preview
+metadata:
+  name: zulip-12-3
+spec:
+  app: zulip
+  parameters:
+    tag: "12.3-0"
+  restoreFrom:
+    snapshot:
+      selector:
+        matchLabels:
+          kupra.futo.tech/channel: base

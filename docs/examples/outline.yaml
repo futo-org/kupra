@@ -1,0 +1,222 @@
+apiVersion: kupra.futo.tech/v1alpha1
+kind: PreviewApp
+metadata:
+  name: outline
+spec:
+  parameters:
+    - name: tag
+      title: Image tag
+      default: "1.10.1"
+      uiHint:
+        type: imageTag
+        repository: docker.io/outlinewiki/outline
+
+  variables:
+    - name: host
+      expression: preview.name + ".outline.preview.example.com"
+
+  links:
+    - name: Web
+      urlExpr: '"https://" + variables.host'
+
+  template:
+    secrets:
+      - name: outline-keys
+        generate: [SECRET_KEY, UTILS_SECRET]
+
+    resources:
+      - apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        metadata:
+          name: database
+        spec:
+          instances: 1
+          storage:
+            size: 10Gi
+
+      - apiVersion: objectstorage.k8s.io/v1alpha2
+        kind: BucketClaim
+        metadata:
+          name: uploads
+        spec:
+          bucketClassName: default
+          protocols:
+            - S3
+      - apiVersion: objectstorage.k8s.io/v1alpha2
+        kind: BucketAccess
+        metadata:
+          name: outline
+        spec:
+          bucketAccessClassName: default
+          protocol: S3
+          bucketClaims:
+            - bucketClaimName: uploads
+              accessSecretName: outline-uploads
+              accessModes:
+                objectData: ReadWrite
+
+      - apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: outline-oidc
+        spec:
+          secretStoreRef:
+            kind: ClusterSecretStore
+            name: default
+          target:
+            name: outline-oidc
+          data:
+            - secretKey: OIDC_CLIENT_ID
+              remoteRef:
+                key: OUTLINE_PREVIEW_OIDC_CLIENT_ID
+            - secretKey: OIDC_CLIENT_SECRET
+              remoteRef:
+                key: OUTLINE_PREVIEW_OIDC_CLIENT_SECRET
+
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: valkey
+        spec:
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: valkey
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: valkey
+            spec:
+              containers:
+                - name: valkey
+                  image: docker.io/valkey/valkey:9
+                  ports:
+                    - name: redis
+                      containerPort: 6379
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: valkey
+        spec:
+          selector:
+            app.kubernetes.io/name: valkey
+          ports:
+            - name: redis
+              port: 6379
+              targetPort: redis
+
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: outline
+        spec:
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: outline
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: outline
+            spec:
+              containers:
+                - name: outline
+                  imageExpr: '"docker.io/outlinewiki/outline:" + params.tag'
+                  env:
+                    - name: URL
+                      valueExpr: '"https://" + variables.host'
+                    - name: DATABASE_URL
+                      valueFrom:
+                        secretKeyRef:
+                          name: database-app
+                          key: uri
+                    - name: REDIS_URL
+                      value: redis://valkey:6379
+                    - name: FILE_STORAGE
+                      value: s3
+                    - name: AWS_S3_UPLOAD_BUCKET_URL
+                      valueFrom:
+                        secretKeyRef:
+                          name: outline-uploads
+                          key: COSI_S3_ENDPOINT
+                    - name: AWS_S3_UPLOAD_BUCKET_NAME
+                      valueFrom:
+                        secretKeyRef:
+                          name: outline-uploads
+                          key: COSI_S3_BUCKET_ID
+                    - name: AWS_REGION
+                      valueFrom:
+                        secretKeyRef:
+                          name: outline-uploads
+                          key: COSI_S3_REGION
+                    - name: AWS_ACCESS_KEY_ID
+                      valueFrom:
+                        secretKeyRef:
+                          name: outline-uploads
+                          key: COSI_S3_ACCESS_KEY_ID
+                    - name: AWS_SECRET_ACCESS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: outline-uploads
+                          key: COSI_S3_ACCESS_SECRET_KEY
+                    - name: AWS_S3_FORCE_PATH_STYLE
+                      value: "true"
+                    - name: AWS_S3_ACL
+                      value: private
+                    - name: OIDC_AUTH_URI
+                      value: https://auth.example.com/oauth/v2/authorize
+                    - name: OIDC_TOKEN_URI
+                      value: https://auth.example.com/oauth/v2/token
+                    - name: OIDC_USERINFO_URI
+                      value: https://auth.example.com/oidc/v1/userinfo
+                    - name: OIDC_SCOPES
+                      value: openid profile email
+                  envFrom:
+                    - secretRef:
+                        name: outline-keys
+                    - secretRef:
+                        name: outline-oidc
+                  ports:
+                    - name: http
+                      containerPort: 3000
+                  readinessProbe:
+                    httpGet:
+                      path: /_health
+                      port: http
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: outline
+        spec:
+          selector:
+            app.kubernetes.io/name: outline
+          ports:
+            - name: http
+              port: 3000
+              targetPort: http
+
+      - apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: web
+        spec:
+          parentRefs:
+            - name: previews
+              namespace: gateway-system
+          hostnamesExpr: '[variables.host]'
+          rules:
+            - backendRefs:
+                - name: outline
+                  port: 3000
+---
+apiVersion: kupra.futo.tech/v1alpha1
+kind: Preview
+metadata:
+  name: outline-1-11
+spec:
+  app: outline
+  parameters:
+    tag: "1.11.0"
+  restoreFrom:
+    snapshot:
+      selector:
+        matchLabels:
+          kupra.futo.tech/channel: base
