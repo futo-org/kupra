@@ -209,6 +209,8 @@ dashboard.
 **Designed for, but later:**
 
 - cloning a running preview
+- portable snapshots that can be exported out of the cluster, for example
+  into a local development environment, and imported back
 - more kinds of state (buckets, generated secrets)
 - sleep and scale-to-zero
 - expiry
