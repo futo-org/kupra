@@ -147,6 +147,19 @@ spec:
               port: 2283
               targetPort: http
 
+      - apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: model-cache
+          annotations:
+            kupra.futo.tech/include-when: params.machineLearning
+            kupra.futo.tech/state: disabled
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
       - apiVersion: apps/v1
         kind: Deployment
         metadata:
@@ -154,6 +167,8 @@ spec:
           annotations:
             kupra.futo.tech/include-when: params.machineLearning
         spec:
+          strategy:
+            type: Recreate
           selector:
             matchLabels:
               app.kubernetes.io/name: immich-machine-learning
@@ -173,7 +188,8 @@ spec:
                       mountPath: /cache
               volumes:
                 - name: cache
-                  emptyDir: {}
+                  persistentVolumeClaim:
+                    claimName: model-cache
       - apiVersion: v1
         kind: Service
         metadata:

@@ -21,11 +21,6 @@ spec:
 
   template:
     secrets:
-      - name: zulip-db-credentials
-        type: kubernetes.io/basic-auth
-        data:
-          username: zulip
-        generate: [password]
       - name: zulip-secrets
         generate: [secret-key, avatar-salt]
       - name: zulip-dragonfly
@@ -40,10 +35,6 @@ spec:
           instances: 1
           bootstrap:
             initdb:
-              database: zulip
-              owner: zulip
-              secret:
-                name: zulip-db-credentials
               localeCollate: C.UTF-8
               localeCType: C.UTF-8
           storage:
@@ -160,13 +151,13 @@ spec:
                     - name: SETTING_REMOTE_POSTGRES_SSLMODE
                       value: require
                     - name: CONFIG_postgresql__database_user
-                      value: zulip
+                      value: app
                     - name: CONFIG_postgresql__database_name
-                      value: zulip
+                      value: app
                     - name: SECRETS_postgres_password
                       valueFrom:
                         secretKeyRef:
-                          name: zulip-db-credentials
+                          name: database-app
                           key: password
 
                     - name: SETTING_RABBITMQ_HOST
