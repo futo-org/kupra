@@ -217,7 +217,8 @@ dashboard.
 - status reporting back to GitHub
 - limits on concurrent previews
 - scheduled refreshes of base snapshots
-- access to running previews (logs, exec)
+- access to running previews (logs, exec, and a database browser such as
+  CloudBeaver, already connected to the preview's databases)
 
 **Non-goals:**
 
