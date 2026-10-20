@@ -212,11 +212,11 @@ kind: Preview
 metadata:
   name: outline-1-11
 spec:
-  app: outline
+  appRef:
+    name: outline
   parameters:
     tag: "1.11.0"
   restoreFrom:
-    snapshot:
-      selector:
-        matchLabels:
-          kupra.futo.tech/channel: base
+    snapshotSelector:
+      matchLabels:
+        kupra.futo.tech/channel: base

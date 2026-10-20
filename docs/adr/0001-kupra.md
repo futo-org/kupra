@@ -123,14 +123,14 @@ kind: Preview
 metadata:
   name: pr-1234
 spec:
-  app: immich
+  appRef:
+    name: immich
   parameters:
     tag: pr-1234
   restoreFrom:
-    snapshot:
-      selector:
-        matchLabels:
-          kupra.futo.tech/channel: base
+    snapshotSelector:
+      matchLabels:
+        kupra.futo.tech/channel: base
 ---
 apiVersion: kupra.futo.tech/v1alpha1
 kind: PreviewSnapshot
@@ -140,7 +140,8 @@ metadata:
     kupra.futo.tech/channel: base
 spec:
   source:
-    preview: main
+    previewRef:
+      name: main
 ```
 
 Complete examples are in [`docs/examples`](../examples).

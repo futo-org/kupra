@@ -277,11 +277,11 @@ kind: Preview
 metadata:
   name: zulip-12-3
 spec:
-  app: zulip
+  appRef:
+    name: zulip
   parameters:
     tag: "12.3-0"
   restoreFrom:
-    snapshot:
-      selector:
-        matchLabels:
-          kupra.futo.tech/channel: base
+    snapshotSelector:
+      matchLabels:
+        kupra.futo.tech/channel: base
