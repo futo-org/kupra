@@ -52,13 +52,14 @@ A snapshot's captured data never changes. To refresh base data, take a new snaps
 `spec.mode` chooses how a snapshot is kept consistent.
 
 - **`Offline`** (the default): kupra stops the preview's app while it captures. It removes the resources that run the preview's pods, apart from state, captures every state resource, then applies them again. With nothing writing, the captures all reflect the same moment: a database row can't refer to a file that's missing from the volume capture. This costs the source preview a short outage. The app is applied again even if a capture fails.
+- **`ScaleDown`**: like `Offline`, but kupra scales each resource that runs the preview's pods to zero through its scale subresource, and only deletes the ones that don't have one. Resources, and whatever their operators created alongside them, stay in place, so the app comes back faster. kupra scales the template's own resources, not what an operator created from them, so the operator doesn't scale them back up.
 - **`Online`**: kupra captures while the app keeps running. Each capture is consistent on its own, but captures are taken a moment apart, so data that spans them may not line up.
 
 Further modes can follow, such as capturing several volumes atomically where storage supports group snapshots.
 
 ### Where snapshot data lives
 
-Captures start out in the source preview's namespace, because that's where VolumeSnapshots and CloudNativePG backups are created. Once a capture is complete, kupra moves it next to the PreviewSnapshot: it binds the same underlying storage snapshot to a new VolumeSnapshot in the PreviewSnapshot's namespace, and carries over what's needed to restore it, such as CloudNativePG's backup annotations. Deleting the source preview, or its whole namespace, then leaves the snapshot intact. Deleting the PreviewSnapshot deletes the storage snapshots.
+Captures start out in the source preview's namespace, because that's where VolumeSnapshots and CloudNativePG backups are created. Once a capture is complete, kupra moves it next to the PreviewSnapshot: it binds the same underlying storage snapshot to a new VolumeSnapshot in the PreviewSnapshot's namespace, and carries over what's needed to restore it, such as CloudNativePG's backup annotations. Deleting the source preview, or its whole namespace, then leaves the snapshot intact. The PreviewSnapshot's own copy is the only one set to delete the storage snapshot when it's removed (`deletionPolicy: Delete`). Every other copy is set to `Retain`.
 
 ### Restoring into a preview
 
@@ -69,6 +70,8 @@ This needs storage that can import an existing snapshot into a new VolumeSnapsho
 ### Choosing a snapshot
 
 A Preview's `restoreFrom` refers to a snapshot by name (`snapshotRef`) or selects one by label (`snapshotSelector`). A selector picks the newest ready snapshot that matches, and kupra records the choice in the Preview's status. Labels such as `kupra.futo.tech/channel: base` are only a convention: kupra gives them no special meaning.
+
+Because a selector picks up any matching snapshot, whoever can create PreviewSnapshots in an app's namespace effectively decides what new previews start from. That permission is meant for trusted people ([ADR 6](0006-access-control.md)). A preview whose data mustn't change underneath it, such as a public demo, should use a `snapshotRef`.
 
 Snapshots aren't tied to the PreviewApp they were taken from. Restoring matches captures to the preview's state resources by name and kind. A state resource with no matching capture starts empty, a capture that matches nothing is ignored, and both are reported on the Preview. This lets a variant of an app, such as a separate demo PreviewApp, start from the main app's snapshots, and lets a PreviewApp gain or drop state resources without invalidating every existing snapshot.
 
@@ -96,7 +99,7 @@ A PreviewSnapshot isn't removed while it's still needed: while a restore from it
 ## Consequences
 
 - kupra needs storage that supports volume snapshots, and importing existing snapshots into new VolumeSnapshots.
-- Taking an `Offline` snapshot briefly takes the source preview's app down.
+- Taking an `Offline` or `ScaleDown` snapshot briefly takes the source preview's app down.
 - Snapshots live in the cluster's own storage. Moving them between clusters, or out of the cluster, is for portable snapshots.
 - Deleting a snapshot can be held up while it's in use.
 - A typo in a state resource's name doesn't fail a restore: that resource starts empty, with a warning on the Preview.

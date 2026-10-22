@@ -288,21 +288,23 @@ The pieces all exist. What's missing is a tool that combines them around state.
 
 ## Later decisions
 
-Most of these have already been explored, and are left out here to keep this
-document focused. Each will get its own ADR:
+These are left out here to keep this document focused, and decided in their
+own ADRs:
 
-- The expression language and template rendering in detail.
-- The interface for supporting a kind of state, and whether it can be extended
-  out of tree.
-- How snapshots are taken consistently and made available to preview
-  namespaces.
-- How preview namespaces are named.
-- How templates are confined: the permissions they're applied with, default
-  network policies, quotas.
-- Sleep and scale-to-zero.
-- Access control, for the dashboard and for running previews.
-- The GitHub integration.
-- Implementation choices: language, tooling, and how the dashboard is built.
+- [2. State](0002-state.md): what counts as state, and how support for a kind
+  of state works.
+- [3. Snapshots](0003-snapshots.md): consistency, where snapshot data lives,
+  and choosing, resetting and keeping snapshots.
+- [4. Namespaces and isolation](0004-namespaces-and-isolation.md): naming, and
+  how templates and previews are confined.
+- [5. Policies](0005-policies.md): how admins control that confinement.
+- [6. Access control](0006-access-control.md)
+- [7. Dashboard](0007-dashboard.md)
+- [8. Templates and expressions](0008-templates-and-expressions.md)
+- [9. Implementation](0009-implementation.md)
+
+Later-scope features, such as portable snapshots, sleep and scale-to-zero, and
+forge integration, are tracked as issues until they're scheduled.
 
 ## Questions for reviewers
 

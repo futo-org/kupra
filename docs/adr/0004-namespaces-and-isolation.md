@@ -19,7 +19,7 @@ Keeping the Preview object outside the namespace it manages means creating a pre
 
 ### Naming
 
-A preview's namespace is named `<namespace>-<preview>`, after the Preview's own namespace and name. So Preview `pr-1234` in `immich-previews` runs in `immich-previews-pr-1234`. If that's longer than Kubernetes allows, kupra shortens it and adds a short hash of the full name. The Preview's status records the namespace it actually uses.
+A preview's namespace is named `<namespace>-<preview>-<hash>`: the Preview's own namespace and name, plus a short hash of both. So Preview `pr-1234` in `immich-previews` runs in something like `immich-previews-pr-1234-7f3a`. Without the hash, different pairs could produce the same name: namespace `a-b` with preview `c`, and namespace `a` with preview `b-c`. If the name is longer than Kubernetes allows, kupra shortens the readable part. The Preview's status records the namespace it actually uses.
 
 kupra labels every preview namespace, so other tools can recognise and select them:
 
@@ -27,7 +27,9 @@ kupra labels every preview namespace, so other tools can recognise and select th
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: immich-previews-pr-1234
+  name: immich-previews-pr-1234-7f3a
+  annotations:
+    kupra.futo.tech/preview-uid: 0b1c2d3e-...
   labels:
     kupra.futo.tech/app: immich
     kupra.futo.tech/preview: pr-1234
@@ -35,13 +37,13 @@ metadata:
     pod-security.kubernetes.io/enforce: baseline
 ```
 
-kupra never takes over a namespace it didn't create. If the name is already in use, the Preview reports the conflict.
+kupra records the owning Preview's UID on the namespace, and only uses a namespace that carries its own Preview's UID. If the name is already in use for anything else, the Preview reports the conflict.
 
 ### Confining templates
 
 kupra renders a template only into its preview's namespace, and sets each resource's namespace itself.
 
-kupra applies template resources with the permissions of a service account in the preview's namespace, not with its own. Admins decide what that account may do, through a role kupra binds to it there. A template can therefore only create the kinds of resources the admins allow, only in its own namespace, and can't grant itself more. Because the binding is namespaced, cluster-scoped resources like CRDs, ClusterRoles or webhooks are never allowed. Flux's multi-tenancy lockdown, which applies each tenant's resources as that tenant's service account, is the precedent.
+kupra applies template resources with the permissions of a service account dedicated to the preview, not with its own. That account lives in kupra's own namespace, not the preview's, because any pod can use any service account in its own namespace: the preview's running app must not be able to borrow it. Admins decide what the account may do, through a role kupra binds to it within the preview's namespace. A template can therefore only create the kinds of resources the admins allow, only in its own namespace, and can't grant itself more. Because the binding is namespaced, cluster-scoped resources like CRDs, ClusterRoles or webhooks are never allowed. Flux's multi-tenancy lockdown, which applies each tenant's resources as that tenant's service account, is the precedent.
 
 The role is what enforces this, but finding out when a preview fails is too late. kupra also checks each PreviewApp's template against the role, and reports anything it wouldn't be allowed to create on the PreviewApp's status, before any preview uses it.
 
@@ -51,9 +53,11 @@ kupra's own work, like capturing and restoring state, uses kupra's own permissio
 
 kupra manages these in every preview namespace, as set by the app's policy (below):
 
-- **Network policies.** Outbound traffic is restricted. By default a preview can reach its own namespace, DNS, and destinations outside the cluster, but nothing else in the cluster. Because every preview is restricted this way, previews can't reach each other or the cluster's internals. Inbound traffic is left open, so the gateway, operators and monitoring can reach previews without kupra having to know where they run. Exactly how "outside the cluster" is expressed depends on the network plugin. Templates can't create their own network policies: network policies only ever add allowances, so one could undo the restrictions.
+- **Network policies.** Outbound traffic is restricted. By default a preview can reach its own namespace, DNS and the public internet, but no private, link-local or other internal addresses: not other previews, the cluster's internals, nodes, or cloud metadata endpoints. Because every preview is restricted this way, previews can't reach each other or the cluster's internals. Inbound traffic is left open, so the gateway, operators and monitoring can reach previews without kupra having to know where they run. Exactly how "outside the cluster" is expressed depends on the network plugin. Templates can't create their own network policies: network policies only ever add allowances, so one could undo the restrictions.
 - **A resource quota and limit range,** so one preview can't starve the others.
 - **Pod Security admission,** at the `baseline` level by default. That blocks privileged pods and host access, while still allowing images that run as root.
+
+These defaults are deliberately conservative, because a preview combines unreviewed code, realistic data, credentials its template fetches, and access to the internet.
 
 ### Policies
 
@@ -61,7 +65,9 @@ The role templates are applied with, the network policies, the quota and the Pod
 
 ### Shared infrastructure
 
-Previews often rely on shared infrastructure: a Gateway to route to them, a ClusterSecretStore for credentials, a StorageClass. Templates can refer to these, but the infrastructure decides whether to accept a preview namespace, using its usual namespace selectors. A Gateway's `allowedRoutes`, for example, can admit routes only from namespaces labelled `kupra.futo.tech/app: immich`. kupra doesn't grant any access to shared infrastructure itself.
+Previews often rely on shared infrastructure: a Gateway to route to them, a ClusterSecretStore for credentials, a StorageClass. Templates can refer to these, but the infrastructure decides whether to accept a preview namespace, using its usual namespace selectors. kupra doesn't grant any access to shared infrastructure itself.
+
+Not every kupra label is safe to grant access on. PreviewApp names aren't unique across the cluster, so any app's admins can produce namespaces labelled `kupra.futo.tech/app: immich`. `kupra.futo.tech/preview-namespace` is safe, since kupra sets it from the namespace the Preview actually lives in. The clearest option is a label the admins add through the app's policy ([ADR 5](0005-policies.md)), such as `example.com/gateway-access: previews`, which a Gateway's `allowedRoutes` can then select.
 
 ## Alternatives considered
 
@@ -75,5 +81,5 @@ Previews often rely on shared infrastructure: a Gateway to route to them, a Clus
 - Templates can't include cluster-scoped resources. Apps that need an operator rely on one installed in the cluster.
 - Admins define what templates may create, and the network, quota and Pod Security settings, in PreviewPolicies. kupra ships a default one.
 - Inbound traffic to previews is open within the cluster. Clusters that run other untrusted workloads should restrict it in their policy.
-- Preview namespace names are derived, and occasionally shortened. The Preview's status is the source of truth.
+- Preview namespace names are derived, end in a short hash, and are occasionally shortened. The Preview's status is the source of truth.
 - Shared infrastructure has to be configured to accept preview namespaces, which kupra's labels make straightforward.

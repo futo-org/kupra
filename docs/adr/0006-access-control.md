@@ -43,9 +43,11 @@ subjects:
 
 PreviewPolicies are cluster-scoped, so they stay with cluster admins.
 
+Creating snapshots is a trusted permission. A new snapshot can become the starting point for everyone's previews ([ADR 3](0003-snapshots.md)), so `kupra-creator` is for people trusted with an app's shared data. People who should only manage their own previews, such as pull request authors, get that through ownership instead.
+
 ### Owning a preview
 
-A Preview's owners can change it, reset it, snapshot it, delete it, and get into it (see below).
+A Preview's owners can change it, reset it, delete it, and get into it (see below). Owners who can also create snapshots can snapshot it.
 
 Its owners are:
 

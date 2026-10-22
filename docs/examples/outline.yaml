@@ -1,3 +1,4 @@
+# Uses features planned after the first version: generated secrets (template.secrets) and COSI buckets.
 apiVersion: kupra.futo.tech/v1alpha1
 kind: PreviewApp
 metadata:

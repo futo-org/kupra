@@ -45,11 +45,11 @@ Rendering and state support are pure functions ([ADR 2](0002-state.md)), so most
 
 ### Supported versions
 
-kupra needs Kubernetes 1.36 or newer, for the admission policy that records who created a preview ([ADR 6](0006-access-control.md)), along with the CSI snapshot API and a recent CloudNativePG.
+kupra needs Kubernetes 1.36 or newer, for the admission policy that records who created a preview ([ADR 6](0006-access-control.md)), along with the CSI snapshot API and a recent CloudNativePG. Kubernetes 1.34 and 1.35 work too, with the MutatingAdmissionPolicy feature gate enabled.
 
 ## Alternatives considered
 
-- **Go with controller-runtime,** the mainstream choice for operators. It has the richer ecosystem: a complete CEL implementation with type checking, test environments that run a real API server without a cluster, and Go client libraries from the operators kupra works with. Rust was chosen for its safety and type system, accepting those gaps.
+- **Go with controller-runtime,** the mainstream choice for operators. It has the richer ecosystem: a complete CEL implementation with type checking, test environments that run a real API server without a cluster, and Go client libraries from the operators kupra works with. Rust was chosen for its safety and type system, accepting those gaps. Support for kinds of state mostly doesn't need those libraries anyway. It works through each operator's resources, validates with server-side dry-runs, and runs tools like `pg_dump` in Jobs rather than linking them. Once ADR 2's request/response boundary is opened up, support can also be written in other languages.
 - **Running CEL's Go implementation for type checking,** for example compiled to WebAssembly. It would provide a complete checker straight away, but adds a second language runtime to the operator. It's a fallback if cel-rust's checker doesn't materialise.
 - **A frontend in Rust,** such as Leptos. One language throughout, but a much smaller ecosystem.
 - **A standalone CLI only.** Simpler to install for people without kubectl, which the plugin's binary also covers.

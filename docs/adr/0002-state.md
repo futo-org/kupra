@@ -45,7 +45,7 @@ More capabilities are anticipated, optional per kind: hibernating while a previe
 
 kupra captures and restores each resource the way the tool that manages it intends. A plain PVC is managed by nothing but Kubernetes itself, so kupra uses the standard VolumeSnapshot API. A CNPG cluster's volumes belong to CNPG, so kupra asks CNPG for a `Backup` and restores with CNPG's recovery bootstrap, rather than snapshotting those volumes itself. Operators maintain their own invariants, and their backup paths handle consistency details that a snapshot taken behind their back would miss.
 
-Supporting a kind also means owning the parts of the resource that capture and restore depend on. For CNPG clusters, that's `bootstrap`. A template can set `bootstrap.initdb` options that shape a new cluster, such as its locale. kupra uses them when a preview starts empty, and replaces them with a recovery bootstrap when it starts from a snapshot. Apps use CNPG's default database, owner and generated credentials, which stay valid across a restore. Renaming them fails the check.
+Supporting a kind also means owning the parts of the resource that capture and restore depend on. For CNPG clusters, that's `backup` and `bootstrap`. kupra configures the cluster's volume snapshot backups itself. A template can set `bootstrap.initdb` options that shape a new cluster, such as its locale. kupra uses them when a preview starts empty, and replaces them with a recovery bootstrap when it starts from a snapshot. Apps use CNPG's default database, owner and generated credentials, which stay valid across a restore. Renaming them fails the check.
 
 ### How support is built
 

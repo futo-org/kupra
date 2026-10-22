@@ -29,7 +29,7 @@ That also means anything clients would otherwise have to compute is worked out b
 
 ```yaml
 status:
-  namespace: immich-previews-pr-1234
+  namespace: immich-previews-pr-1234-7f3a
   links:
     - name: Web
       url: https://pr-1234.immich.preview.example.com
@@ -51,7 +51,7 @@ The operator, on the other hand, holds broad permissions: it creates namespaces 
 
 The dashboard is served by a small backend, which is the only thing the browser talks to. The backend signs people in, and passes their requests on to the Kubernetes API with their token. So the API server doesn't need to be reachable from browsers.
 
-The token stays out of the page itself: the browser holds only an HttpOnly session cookie, and the tokens can be stored encrypted inside it, so the backend stays stateless. These tokens carry the user's full cluster permissions, including exec into their previews. If the page held them, one cross-site scripting bug would let an attacker take a token and use it from anywhere until it expires, refresh token included. This is the backend-for-frontend pattern that the OAuth working group recommends for browser apps.
+The token stays out of the page itself: the browser holds only HttpOnly cookies, with the access and refresh tokens encrypted inside them. That keeps the backend stateless, with no session store to run. Tokens can exceed a single cookie's size limit, so they're split across several cookies when needed, the way oauth2-proxy does it. Logging out revokes the refresh token with the identity provider, so a stolen cookie is only useful until its short-lived access token expires. These tokens carry the user's full cluster permissions, including exec into their previews. If the page held them, one cross-site scripting bug would let an attacker take a token and use it from anywhere until it expires, refresh token included. This is the backend-for-frontend pattern that the OAuth working group recommends for browser apps.
 
 The backend also watches kupra's resources as the user, and pushes changes to the page, so status updates appear live.
 
