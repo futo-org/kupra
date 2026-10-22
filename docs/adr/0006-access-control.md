@@ -65,7 +65,7 @@ Previews created by automation, such as a Flux ResourceSet, have no person as th
 
 kupra enforces ownership with ordinary RBAC, so `kubectl auth can-i` gives the real answer. For each Preview, it creates a Role in the app's namespace covering just that Preview, and binds the owners to it.
 
-Snapshots need one extra step, because RBAC controls who can create a PreviewSnapshot but not which preview it captures. The owners' Role also grants a custom `snapshot` verb on their Preview, and `kupra-admin` grants it on all of them. kupra checks that a snapshot's creator holds it, with a SubjectAccessReview, before capturing. Without that, anyone who can create snapshots could take an `Offline` snapshot of someone else's preview, and briefly take it down.
+Snapshots need one extra step, because RBAC controls who can create a PreviewSnapshot but not which preview it captures. The owners' Role also grants a custom `snapshot` verb on their Preview, and `kupra-admin` grants it on all of them. When a PreviewSnapshot is created, an admission policy asks RBAC whether its creator holds that verb on the source Preview, and rejects the snapshot if not. ValidatingAdmissionPolicy can make that check directly, so the decision stays with RBAC. Without it, anyone who can create snapshots could take an `Offline` snapshot of someone else's preview, and briefly take it down.
 
 ### Getting into a running preview
 

@@ -302,6 +302,8 @@ own ADRs:
 - [7. Dashboard](0007-dashboard.md)
 - [8. Templates and expressions](0008-templates-and-expressions.md)
 - [9. Implementation](0009-implementation.md)
+- [10. Lifecycle](0010-lifecycle.md): how operations on a preview fit
+  together, and how its state is reported.
 
 Later-scope features, such as portable snapshots, sleep and scale-to-zero, and
 forge integration, are tracked as issues until they're scheduled.
