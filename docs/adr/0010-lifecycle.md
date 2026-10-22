@@ -20,7 +20,7 @@ So the lifecycle isn't a stored state with transitions. It's a set of rules, app
 | Request | Recorded as |
 | --- | --- |
 | Update | The Preview's `generation` is ahead of its `status.observedGeneration`. |
-| Reset | `kupra.futo.tech/reset-requested-at` is newer than `status.lastHandledResetAt`. |
+| Reset | `kupra.futo.tech/reset-requested-at` differs from `status.lastHandledResetAt`. |
 | Snapshot | A PreviewSnapshot refers to the preview, and hasn't succeeded or failed yet. |
 | Deletion | The Preview has a deletion timestamp, and kupra's finalizer holds it until cleanup is done. |
 
@@ -30,13 +30,13 @@ For a Preview, the first rule that applies decides what kupra does:
 
 1. **It's being deleted.** A capture of it that's already running finishes first. Then kupra takes the final snapshot, if one is configured, and removes everything.
 2. **A capture of it is running.** Changes to the template and parameters are held back, so the snapshot matches the parameters it records. For an `Offline` or `ScaleDown` capture, the app also stays stopped.
-3. **A reset is requested, and no capture was requested before it.** kupra stops the app, removes the state, restores it again, and records the reset as handled.
+3. **A reset is requested.** kupra stops the app, removes the state, restores it again, and records the reset as handled. Captures that haven't started yet wait until after the reset. Otherwise a capture waiting for a broken preview to become ready would block the reset that's meant to fix it.
 4. **Otherwise,** kupra converges to the spec. It creates and restores any missing state, waits for state to be ready, then applies the rest of the template.
 
 For a PreviewSnapshot:
 
 1. **It's being deleted.** It's held while it's in use, as [ADR 3](0003-snapshots.md) describes.
-2. **It hasn't started.** It starts once its source preview is running with nothing requested before it: no earlier capture, and no earlier reset. So captures and resets of the same preview happen in the order they were requested.
+2. **It hasn't started.** It starts once its source preview is running, with no other capture of it running and no reset waiting. Captures of the same preview start in the order they were created.
 3. **It's running.** kupra continues the captures, then moves them next to the snapshot.
 
 ### Phases
@@ -77,7 +77,7 @@ spec:
       ttl: 168h
 ```
 
-kupra takes it itself, as part of deleting the preview, so it doesn't depend on who or what deleted it. A pull request preview removed by automation keeps its state for a week, for example. The capture is `Offline`, since the app is going away anyway. The snapshot is named after the preview, carries no channel labels, and expires after its `ttl`.
+kupra takes it itself, as part of deleting the preview, so it doesn't depend on who or what deleted it. A pull request preview removed by automation keeps its state for a week, for example. The capture is `Offline`, since the app is going away anyway. The snapshot is named after the preview, carries no channel labels, and expires after its `ttl`. If the namespace the Preview lives in is itself being deleted, there's nowhere to keep the snapshot: Kubernetes refuses new objects there, and would delete them along with the namespace anyway. kupra then skips the final snapshot and reports that it did.
 
 ## Alternatives considered
 

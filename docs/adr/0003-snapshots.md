@@ -79,7 +79,7 @@ Snapshots aren't tied to the PreviewApp they were taken from. Restoring matches 
 
 Resetting a preview recreates it as if it had just been created: its state is restored again, and its workload starts fresh. A `snapshotSelector` is resolved again, so a reset picks up the newest matching snapshot. To always return to the same data, use a `snapshotRef`.
 
-A reset is requested by setting the `kupra.futo.tech/reset-requested-at` annotation on the Preview to the current time, and kupra records the last value it handled in the Preview's status. This follows Flux's `reconcile.fluxcd.io/requestedAt`, so a dashboard button, a CronJob or a GitOps change can all request a reset without owning the Preview's spec.
+A reset is requested by setting the `kupra.futo.tech/reset-requested-at` annotation on the Preview to a new value, conventionally the current time. kupra records the last value it handled in the Preview's status, and any value that differs from it requests a reset. This follows Flux's `reconcile.fluxcd.io/requestedAt`, so a dashboard button, a CronJob or a GitOps change can all request a reset without owning the Preview's spec.
 
 ### Retention and deletion
 
