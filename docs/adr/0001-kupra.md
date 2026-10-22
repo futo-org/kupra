@@ -115,7 +115,7 @@ spec:
             spec:
               containers:
                 - name: server
-                  imageExpr: '"ghcr.io/immich-app/immich-server:" + params.tag'
+                  imageExpr: '"ghcr.io/immich-app/immich-server:" + parameters.tag'
       # ...Services, an HTTPRoute, and so on
 ---
 apiVersion: kupra.futo.tech/v1alpha1

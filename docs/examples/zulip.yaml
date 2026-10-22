@@ -135,7 +135,7 @@ spec:
             spec:
               containers:
                 - name: zulip
-                  imageExpr: '"ghcr.io/zulip/zulip-server:" + params.tag'
+                  imageExpr: '"ghcr.io/zulip/zulip-server:" + parameters.tag'
                   env:
                     - name: SETTING_EXTERNAL_HOST
                       valueExpr: variables.host

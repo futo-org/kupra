@@ -60,7 +60,7 @@ Support is built into kupra for now. Because the boundary is a plain request and
 ```yaml
 metadata:
   annotations:
-    kupra.futo.tech/state: disabled
+    kupra.futo.tech/state: "false"
 ```
 
 An opted-out resource is ordinary workload. It isn't captured or restored, kupra leaves it as written, and it may be deleted and recreated, losing its data. This is meant for:

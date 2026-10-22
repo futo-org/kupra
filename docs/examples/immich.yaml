@@ -97,7 +97,7 @@ spec:
             spec:
               containers:
                 - name: server
-                  imageExpr: '"ghcr.io/immich-app/immich-server:" + params.tag'
+                  imageExpr: '"ghcr.io/immich-app/immich-server:" + parameters.tag'
                   env:
                     - name: DB_HOSTNAME
                       valueFrom:
@@ -152,8 +152,8 @@ spec:
         metadata:
           name: model-cache
           annotations:
-            kupra.futo.tech/include-when: params.machineLearning
-            kupra.futo.tech/state: disabled
+            kupra.futo.tech/include: parameters.machineLearning
+            kupra.futo.tech/state: "false"
         spec:
           accessModes:
             - ReadWriteOnce
@@ -165,7 +165,7 @@ spec:
         metadata:
           name: immich-machine-learning
           annotations:
-            kupra.futo.tech/include-when: params.machineLearning
+            kupra.futo.tech/include: parameters.machineLearning
         spec:
           strategy:
             type: Recreate
@@ -179,7 +179,7 @@ spec:
             spec:
               containers:
                 - name: machine-learning
-                  imageExpr: '"ghcr.io/immich-app/immich-machine-learning:" + params.tag'
+                  imageExpr: '"ghcr.io/immich-app/immich-machine-learning:" + parameters.tag'
                   ports:
                     - name: http
                       containerPort: 3003
@@ -195,7 +195,7 @@ spec:
         metadata:
           name: immich-machine-learning
           annotations:
-            kupra.futo.tech/include-when: params.machineLearning
+            kupra.futo.tech/include: parameters.machineLearning
         spec:
           selector:
             app.kubernetes.io/name: immich-machine-learning
