@@ -59,7 +59,9 @@ Expressions can refer to:
 
 Rendering is deterministic: expressions have no access to the time, randomness or anything else in the cluster, so the same PreviewApp and Preview always render the same objects.
 
-kupra compiles and type-checks every expression when a PreviewApp changes, and reports errors on the PreviewApp's status. Problems surface there, together with the state checks of [ADR 2](0002-state.md) and the permission checks of [ADR 4](0004-namespaces-and-isolation.md), before any preview is affected.
+kupra checks every expression when a PreviewApp changes: at least its syntax and the names it refers to. Problems are reported on the PreviewApp's status, together with the state checks of [ADR 2](0002-state.md) and the permission checks of [ADR 4](0004-namespaces-and-isolation.md), before any preview is affected.
+
+Full type checking follows once kupra's CEL implementation supports it ([ADR 9](0009-implementation.md)). Until then, a type error shows up on the Preview when it renders. Wrongly typed results are still rejected when they're applied: the API server validates every resource against its schema, CRDs included, and Helm validates a release's values against its chart's values schema, if the chart has one.
 
 ### Variables
 
