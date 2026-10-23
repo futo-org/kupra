@@ -64,7 +64,7 @@ Tools should rely on the conditions rather than the phase: `Ready`, `Reconciling
 
 kupra waits for state to be ready before applying the rest of the template, so an app doesn't start against a database that's still recovering. Each kind of state decides what ready means. For a CloudNativePG cluster, it's the cluster's own `Ready` condition. For a PVC it's only that the claim exists. With storage that binds a volume only once a pod uses it, waiting for more would wait forever.
 
-A preview is ready when every resource kupra applied is ready, judged by the same rules Flux and `kubectl wait` use. Readiness probes in the template are what make that meaningful. If a preview hasn't become ready within a time its PreviewApp can set, 30 minutes by default, kupra marks it `Stalled` but keeps trying.
+A preview is ready when every resource kupra applied is ready, judged by the same rules Flux uses. Readiness probes in the template are what make that meaningful. If a preview hasn't become ready within a time its PreviewApp can set, 30 minutes by default, kupra marks it `Stalled` but keeps trying.
 
 ### A final snapshot on deletion
 

@@ -37,7 +37,7 @@ This is deliberately much smaller than a full JSON schema. It's shaped by what a
 
 Expressions are written in [CEL](https://cel.dev), the language Kubernetes itself uses for validation rules and admission policies. CEL is sandboxed, cost-limited and typed, and many Kubernetes users already know it.
 
-Any field in a template can be given as an expression by adding `Expr` to its name. The rendered object gets the field without the suffix, holding the expression's result, which can be any type. Giving both `image` and `imageExpr` is an error. A literal key that happens to end in `Expr`, for example in labels or a ConfigMap's data, would be taken for an expression too. That's rare, and it fails rather than passing silently: in the PreviewApp's checks if the value isn't valid CEL, and otherwise when the result is applied, since labels and a ConfigMap's data only accept strings. Fields without a schema, such as a HelmRelease's `values`, are the exception. The workaround is to give the whole parent map as an expression, since the keys of an expression's result aren't checked for the suffix again.
+Any field in a template can be given as an expression by adding `Expr` to its name. The rendered object gets the field without the suffix, holding the expression's result, which can be any type. Giving both `image` and `imageExpr` is an error. A literal key that happens to end in `Expr`, for example in labels or a ConfigMap's data, would be taken for an expression too. That's rare, and it fails in the PreviewApp's checks rather than passing silently: either the value isn't valid CEL, or its result has the wrong type for the field, since labels and a ConfigMap's data only accept strings. Fields without a schema, such as a HelmRelease's `values`, are the exception. The workaround is to give the whole parent map as an expression, since the keys of an expression's result aren't checked for the suffix again.
 
 The suffix needs a field name to attach to, which matters for lists. In a list of objects, like a container's `env`, each entry has fields of its own, so the suffix goes on those. A list of plain values, like a container's `args`, has no field names inside it, so the expression goes on the list itself and produces all of it:
 
@@ -59,9 +59,9 @@ Expressions can refer to:
 
 Rendering is deterministic: expressions have no access to the time, randomness or anything else in the cluster, so the same PreviewApp and Preview always render the same objects.
 
-kupra checks every expression when a PreviewApp changes: at least its syntax and the names it refers to. Problems are reported on the PreviewApp's status, together with the state checks of [ADR 2](0002-state.md) and the permission checks of [ADR 4](0004-namespaces-and-isolation.md), before any preview is affected.
+kupra compiles and type-checks every expression when a PreviewApp changes. Problems are reported on the PreviewApp's status, together with the state checks of [ADR 2](0002-state.md) and the permission checks of [ADR 4](0004-namespaces-and-isolation.md), before any preview is affected.
 
-Full type checking follows once kupra's CEL implementation supports it ([ADR 9](0009-implementation.md)). Until then, a type error shows up on the Preview when it renders. Wrongly typed results are still rejected when they're applied: the API server validates every resource against its schema, CRDs included, and Helm validates a release's values against its chart's values schema, if the chart has one.
+The types an expression can use come from the parameters, the preview and the variables. The type its result must have comes from the schema of the field it fills in: the API server publishes schemas for every kind of resource, CRDs included. Fields without a schema, such as a HelmRelease's `values`, accept any type. Helm still validates a release's values against its chart's values schema, if the chart has one.
 
 ### Variables
 
