@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -31,7 +32,10 @@ import (
 
 const kupraNamespace = "kupra-system"
 
-var k8s client.Client
+var (
+	k8s        client.Client
+	restConfig *rest.Config
+)
 
 func TestMain(m *testing.M) {
 	os.Exit(run(m))
@@ -48,6 +52,7 @@ func run(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "starting envtest: %v\n", err)
 		return 1
 	}
+	restConfig = cfg
 	defer func() {
 		if err := env.Stop(); err != nil {
 			fmt.Fprintf(os.Stderr, "stopping envtest: %v\n", err)

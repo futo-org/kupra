@@ -1,0 +1,41 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: kupra-created-by
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [kupra.futo.tech]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [previews]
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  variables:
+    - name: key
+      expression: '"kupra.futo.tech/created-by"'
+    - name: creator
+      expression: >-
+        request.operation == "CREATE" ? request.userInfo.username :
+        has(oldObject.metadata.annotations) && variables.key in oldObject.metadata.annotations ?
+        oldObject.metadata.annotations[variables.key] : ""
+    - name: hasAnnotations
+      expression: has(object.metadata.annotations)
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          variables.creator != "" ?
+          (variables.hasAnnotations ?
+            [JSONPatch{op: "add", path: "/metadata/annotations/" + jsonpatch.escapeKey(variables.key), value: variables.creator}] :
+            [JSONPatch{op: "add", path: "/metadata/annotations", value: {variables.key: variables.creator}}]) :
+          (variables.hasAnnotations && variables.key in object.metadata.annotations ?
+            [JSONPatch{op: "remove", path: "/metadata/annotations/" + jsonpatch.escapeKey(variables.key)}] :
+            [])
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: kupra-created-by
+spec:
+  policyName: kupra-created-by

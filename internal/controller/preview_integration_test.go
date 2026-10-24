@@ -231,6 +231,48 @@ template:
 		}
 	})
 
+	t.Run("policy change while the app is missing", func(t *testing.T) {
+		createApp(t, "previews", "short-lived", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+`)
+		orphan := &kuprav1alpha1.Preview{
+			ObjectMeta: metav1.ObjectMeta{Name: "orphan", Namespace: "previews"},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "short-lived"}},
+		}
+		if err := k8s.Create(ctx, orphan); err != nil {
+			t.Fatal(err)
+		}
+		orphanNamespace := waitForPhase(t, "previews", "orphan", kuprav1alpha1.PreviewRunning, "Succeeded").Status.Namespace
+		if err := k8s.Delete(ctx, &kuprav1alpha1.PreviewApp{ObjectMeta: metav1.ObjectMeta{Name: "short-lived", Namespace: "previews"}}); err != nil {
+			t.Fatal(err)
+		}
+		waitForPhase(t, "previews", "orphan", kuprav1alpha1.PreviewPending, "AppNotFound")
+
+		var pol kuprav1alpha1.PreviewPolicy
+		if err := k8s.Get(ctx, client.ObjectKey{Name: "previews"}, &pol); err != nil {
+			t.Fatal(err)
+		}
+		pol.Spec.NamespaceMetadata.Labels["pod-security.kubernetes.io/enforce"] = "restricted"
+		if err := k8s.Update(ctx, &pol); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, func() error {
+			var ns corev1.Namespace
+			if err := k8s.Get(ctx, client.ObjectKey{Name: orphanNamespace}, &ns); err != nil {
+				return err
+			}
+			if got := ns.Labels["pod-security.kubernetes.io/enforce"]; got != "restricted" {
+				return fmt.Errorf("Pod Security level = %q, want restricted", got)
+			}
+			return nil
+		})
+	})
+
 	t.Run("namespace conflict", func(t *testing.T) {
 		conflict := controller.PreviewNamespaceName("previews", "taken")
 		createNamespace(t, conflict, nil)

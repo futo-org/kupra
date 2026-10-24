@@ -110,6 +110,32 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	nsName := previewNamespaceName(p.Namespace, p.Name)
 	p.Status.Namespace = nsName
 
+	namespaceExists, err := r.ensureAccess(ctx, p, nsName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	pol, err := policy.ForNamespace(ctx, r.Client, p.Namespace)
+	if notFound := (*policy.NotFoundError)(nil); errors.As(err, &notFound) {
+		pending(p, ReasonPolicyNotFound, err.Error())
+		return ctrl.Result{}, nil
+	}
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	settings := policy.Effective(pol.Spec)
+	accountName := nsName
+
+	// An existing preview namespace follows its policy even while the app is missing or failing its checks.
+	if namespaceExists {
+		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
+			if reason != "" {
+				pending(p, reason, message)
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
 	var app kuprav1alpha1.PreviewApp
 	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.AppRef.Name}, &app); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -127,28 +153,16 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, nil
 	}
 
-	pol, err := policy.ForNamespace(ctx, r.Client, p.Namespace)
-	if notFound := (*policy.NotFoundError)(nil); errors.As(err, &notFound) {
-		pending(p, ReasonPolicyNotFound, err.Error())
-		return ctrl.Result{}, nil
-	}
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	settings := policy.Effective(pol.Spec)
-
-	if reason, message, err := r.ensureNamespace(ctx, p, nsName, settings); err != nil || reason != "" {
-		if reason != "" {
-			pending(p, reason, message)
+	if !namespaceExists {
+		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
+			if reason != "" {
+				pending(p, reason, message)
+			}
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, err
-	}
-	if err := r.applyPolicy(ctx, nsName, settings); err != nil {
-		return ctrl.Result{}, err
-	}
-	accountName := nsName
-	if err := r.ensureApplyAccount(ctx, p, nsName, accountName, settings.Apply.ClusterRoleRef.Name); err != nil {
-		return ctrl.Result{}, err
+		if err := r.bindNamespaceAccess(ctx, p, nsName); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	compiled, errs := render.Compile(&app.Spec)
@@ -208,6 +222,17 @@ func stallAfterTimeout(p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, 
 		setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionStalled, metav1.ConditionTrue, ReasonTimeout,
 			fmt.Sprintf("not ready after %s: %s", timeout, message))
 	}
+}
+
+// confine sets up the preview's namespace as its policy says: the namespace itself, the policy's objects in it, and the account templates are applied as. It returns a reason when the namespace can't be used yet.
+func (r *PreviewReconciler) confine(ctx context.Context, p *kuprav1alpha1.Preview, namespace, account string, settings kuprav1alpha1.PreviewPolicySpec) (reason, message string, err error) {
+	if reason, message, err := r.ensureNamespace(ctx, p, namespace, settings); err != nil || reason != "" {
+		return reason, message, err
+	}
+	if err := r.applyPolicy(ctx, namespace, settings); err != nil {
+		return "", "", err
+	}
+	return "", "", r.ensureApplyAccount(ctx, p, namespace, account, settings.Apply.ClusterRoleRef.Name)
 }
 
 // ensureNamespace creates or updates the preview's namespace. It returns a reason when the namespace can't be used yet.
@@ -498,16 +523,6 @@ func refOf(obj *unstructured.Unstructured) kuprav1alpha1.ResourceRef {
 	return kuprav1alpha1.ResourceRef{APIVersion: obj.GetAPIVersion(), Kind: obj.GetKind(), Name: obj.GetName()}
 }
 
-func union(a, b []kuprav1alpha1.ResourceRef) []kuprav1alpha1.ResourceRef {
-	out := slices.Clone(a)
-	for _, ref := range b {
-		if !slices.Contains(out, ref) {
-			out = append(out, ref)
-		}
-	}
-	return out
-}
-
 const appRefIndex = ".spec.appRef.name"
 
 func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
@@ -526,6 +541,7 @@ func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		Watches(&kuprav1alpha1.PreviewApp{}, handler.EnqueueRequestsFromMapFunc(r.previewsOfApp)).
 		Watches(&kuprav1alpha1.PreviewPolicy{}, handler.EnqueueRequestsFromMapFunc(r.allPreviews)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.previewsForNamespace)).
+		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.previewsForAdminBinding)).
 		Complete(r)
 }
 
