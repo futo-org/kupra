@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -25,6 +28,8 @@ import (
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/controller"
 )
+
+const kupraNamespace = "kupra-system"
 
 var k8s client.Client
 
@@ -53,12 +58,22 @@ func run(m *testing.M) int {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(kuprav1alpha1.AddToScheme(scheme))
 
+	k8s, err = client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "creating client: %v\n", err)
+		return 1
+	}
+	if err := k8s.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: kupraNamespace}}); err != nil {
+		fmt.Fprintf(os.Stderr, "creating kupra's namespace: %v\n", err)
+		return 1
+	}
+
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme, Metrics: metricsserver.Options{BindAddress: "0"}})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "creating manager: %v\n", err)
 		return 1
 	}
-	if err := controller.Setup(mgr); err != nil {
+	if err := controller.Setup(context.Background(), mgr, controller.Options{Namespace: kupraNamespace}); err != nil {
 		fmt.Fprintf(os.Stderr, "setting up controllers: %v\n", err)
 		return 1
 	}
@@ -70,11 +85,6 @@ func run(m *testing.M) int {
 		}
 	}()
 
-	k8s, err = client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "creating client: %v\n", err)
-		return 1
-	}
 	return m.Run()
 }
 
@@ -112,5 +122,17 @@ func eventually(t *testing.T, check func() error) {
 			t.Fatal(err)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// setUpPolicy applies kupra's template roles and creates a PreviewPolicy, unless it exists already. envtest has no controller-manager to aggregate ClusterRoles, so policies point at the rules directly.
+func setUpPolicy(t *testing.T, p *kuprav1alpha1.PreviewPolicy) {
+	t.Helper()
+	apply(t, filepath.Join("..", "..", "charts", "kupra", "templates", "template-clusterroles.yaml"))
+	if p.Spec.Apply == nil {
+		p.Spec.Apply = &kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: "kupra-preview-template-base"}}
+	}
+	if err := k8s.Create(context.Background(), p); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
 	}
 }

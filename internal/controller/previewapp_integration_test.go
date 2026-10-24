@@ -5,7 +5,6 @@ package controller_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,19 +60,7 @@ func waitForReady(t *testing.T, app *kuprav1alpha1.PreviewApp, status metav1.Con
 }
 
 func TestPreviewAppChecks(t *testing.T) {
-	ctx := context.Background()
-	apply(t, filepath.Join("..", "..", "charts", "kupra", "templates", "template-clusterroles.yaml"))
-
-	// envtest has no controller-manager to aggregate ClusterRoles, so point the policy at the rules directly.
-	p := &kuprav1alpha1.PreviewPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: policy.DefaultName},
-		Spec: kuprav1alpha1.PreviewPolicySpec{
-			Apply: &kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: "kupra-preview-template-base"}},
-		},
-	}
-	if err := k8s.Create(ctx, p); err != nil {
-		t.Fatal(err)
-	}
+	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: policy.DefaultName}})
 	createNamespace(t, "checks", nil)
 
 	valid := createApp(t, "checks", "valid", `
@@ -168,11 +155,7 @@ template:
 `)
 	waitForReady(t, custom, metav1.ConditionFalse, "PolicyNotFound", "PreviewPolicy custom doesn't exist")
 
-	customPolicy := p.DeepCopy()
-	customPolicy.ObjectMeta = metav1.ObjectMeta{Name: "custom"}
-	if err := k8s.Create(ctx, customPolicy); err != nil {
-		t.Fatal(err)
-	}
+	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: "custom"}})
 	waitForReady(t, custom, metav1.ConditionTrue, "Succeeded")
 }
 

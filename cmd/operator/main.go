@@ -29,6 +29,13 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&logOpts)))
 	log := ctrl.Log.WithName("setup")
 
+	namespace := os.Getenv("RUNTIME_NAMESPACE")
+	if namespace == "" {
+		log.Error(nil, "RUNTIME_NAMESPACE must be set to the namespace kupra runs in")
+		os.Exit(1)
+	}
+	ctx := ctrl.SetupSignalHandler()
+
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(kuprav1alpha1.AddToScheme(scheme))
@@ -45,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := controller.Setup(mgr); err != nil {
+	if err := controller.Setup(ctx, mgr, controller.Options{Namespace: namespace}); err != nil {
 		log.Error(err, "unable to set up controllers")
 		os.Exit(1)
 	}
@@ -58,7 +65,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		log.Error(err, "manager exited with an error")
 		os.Exit(1)
 	}

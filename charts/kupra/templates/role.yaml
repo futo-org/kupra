@@ -7,17 +7,28 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - limitranges
+  - resourcequotas
+  verbs:
+  - create
+  - delete
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - namespaces
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - kupra.futo.tech
   resources:
   - previewapps
   - previewpolicies
-  - previews
   - previewsnapshots
   verbs:
   - get
@@ -27,10 +38,36 @@ rules:
   - kupra.futo.tech
   resources:
   - previewapps/status
+  - previews/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - kupra.futo.tech
+  resources:
+  - previews
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kupra.futo.tech
+  resources:
+  - previews/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - list
+  - patch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
@@ -39,3 +76,44 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kupra-operator
+  namespace: kupra-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - impersonate
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - update

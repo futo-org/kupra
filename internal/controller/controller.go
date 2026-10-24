@@ -7,14 +7,22 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/check"
 )
 
+// Leader election:
+// +kubebuilder:rbac:groups=coordination.k8s.io,namespace=kupra-system,resources=leases,verbs=get;create;update
+// +kubebuilder:rbac:groups="",namespace=kupra-system,resources=events,verbs=create;patch
+
+type Options struct {
+	// Namespace is kupra's own namespace.
+	Namespace string
+}
+
 // Setup registers the controllers with the manager.
-func Setup(mgr ctrl.Manager) error {
+func Setup(ctx context.Context, mgr ctrl.Manager, opts Options) error {
 	dc, err := discovery.NewDiscoveryClientForConfig(mgr.GetConfig())
 	if err != nil {
 		return err
@@ -33,18 +41,21 @@ func Setup(mgr ctrl.Manager) error {
 		return err
 	}
 
-	for _, obj := range []client.Object{
-		&kuprav1alpha1.Preview{},
-		&kuprav1alpha1.PreviewSnapshot{},
-	} {
-		if err := ctrl.NewControllerManagedBy(mgr).For(obj).Complete(noopReconciler{}); err != nil {
-			return err
-		}
+	previews := &PreviewReconciler{
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+		Config:    mgr.GetConfig(),
+		Mapper:    mgr.GetRESTMapper(),
+		Namespace: opts.Namespace,
 	}
-	return nil
+	if err := previews.SetupWithManager(ctx, mgr); err != nil {
+		return err
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).For(&kuprav1alpha1.PreviewSnapshot{}).Complete(noopReconciler{})
 }
 
-// +kubebuilder:rbac:groups=kupra.futo.tech,resources=previews;previewsnapshots,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots,verbs=get;list;watch
 
 type noopReconciler struct{}
 
