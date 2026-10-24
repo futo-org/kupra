@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run end-to-end tests"
+set -euo pipefail
+
+export KUBECONFIG="$PWD/.e2e/kubeconfig"
+go test -tags e2e -count 1 ./test/e2e/...

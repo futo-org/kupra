@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Delete the end-to-end test cluster"
+set -euo pipefail
+
+kind delete cluster --name kupra-e2e --kubeconfig .e2e/kubeconfig

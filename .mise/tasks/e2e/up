@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Create the end-to-end test cluster"
+set -euo pipefail
+
+cluster=kupra-e2e
+context="kind-$cluster"
+workdir=.e2e
+mkdir -p "$workdir"
+export KUBECONFIG="$workdir/kubeconfig"
+k() { kubectl --context "$context" "$@"; }
+
+if ! kind get clusters | grep -qx "$cluster"; then
+  kind create cluster --name "$cluster" --wait 120s
+fi
+kind export kubeconfig --name "$cluster"
+
+snapshotter="$workdir/external-snapshotter-$E2E_SNAPSHOTTER_VERSION"
+if [ ! -d "$snapshotter" ]; then
+  git clone --quiet --depth 1 --branch "$E2E_SNAPSHOTTER_VERSION" \
+    https://github.com/kubernetes-csi/external-snapshotter.git "$snapshotter"
+fi
+k apply --server-side -k "$snapshotter/client/config/crd"
+k apply --server-side -k "$snapshotter/deploy/kubernetes/snapshot-controller"
+k -n kube-system rollout status deployment/snapshot-controller --timeout=180s
+
+hostpath="$workdir/csi-driver-host-path-$E2E_CSI_HOSTPATH_VERSION"
+if [ ! -d "$hostpath" ]; then
+  git clone --quiet --depth 1 --branch "$E2E_CSI_HOSTPATH_VERSION" \
+    https://github.com/kubernetes-csi/csi-driver-host-path.git "$hostpath"
+fi
+"$hostpath/deploy/kubernetes-latest/deploy.sh"
+k apply -f "$hostpath/examples/csi-storageclass.yaml"
+k annotate storageclass standard storageclass.kubernetes.io/is-default-class=false --overwrite
+k annotate storageclass csi-hostpath-sc storageclass.kubernetes.io/is-default-class=true --overwrite
+k rollout status statefulset/csi-hostpathplugin --timeout=180s
+
+k apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/${E2E_CNPG_VERSION}/cnpg-${E2E_CNPG_VERSION#v}.yaml"
+k -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+
+k apply --server-side -f charts/kupra/crds
