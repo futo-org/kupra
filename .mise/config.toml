@@ -1,0 +1,12 @@
+[settings]
+pin = true
+lockfile = true
+
+[tools]
+go = "1.27.3"
+golangci-lint = "2.15.0"
+zizmor = "1.31.1"
+
+[tasks.check]
+description = "Run linters and unit tests"
+depends = ["lint:*", "test:unit"]
