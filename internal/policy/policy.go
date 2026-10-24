@@ -2,12 +2,16 @@
 package policy
 
 import (
+	"context"
+	"fmt"
 	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
@@ -87,4 +91,33 @@ func defaultNetworkPolicies() []kuprav1alpha1.NetworkPolicyTemplate {
 			},
 		},
 	}}
+}
+
+// NotFoundError means an app namespace names a PreviewPolicy that doesn't exist.
+type NotFoundError struct {
+	Name string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("PreviewPolicy %s doesn't exist", e.Name)
+}
+
+// ForNamespace returns the PreviewPolicy that applies to an app namespace.
+func ForNamespace(ctx context.Context, c client.Reader, namespace string) (*kuprav1alpha1.PreviewPolicy, error) {
+	var ns corev1.Namespace
+	if err := c.Get(ctx, client.ObjectKey{Name: namespace}, &ns); err != nil {
+		return nil, err
+	}
+	name := ns.Labels[Label]
+	if name == "" {
+		name = DefaultName
+	}
+	var p kuprav1alpha1.PreviewPolicy
+	if err := c.Get(ctx, client.ObjectKey{Name: name}, &p); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, &NotFoundError{Name: name}
+		}
+		return nil, err
+	}
+	return &p, nil
 }

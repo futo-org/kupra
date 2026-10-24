@@ -1,0 +1,41 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kupra-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kupra.futo.tech
+  resources:
+  - previewapps
+  - previewpolicies
+  - previews
+  - previewsnapshots
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kupra.futo.tech
+  resources:
+  - previewapps/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
+  verbs:
+  - get
+  - list
+  - watch
