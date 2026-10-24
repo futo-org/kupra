@@ -1,0 +1,47 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kupra-viewer
+rules:
+  - apiGroups: [kupra.futo.tech]
+    resources: [previewapps, previews, previewsnapshots]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kupra-creator
+rules:
+  - apiGroups: [kupra.futo.tech]
+    resources: [previewapps, previews, previewsnapshots]
+    verbs: [get, list, watch]
+  - apiGroups: [kupra.futo.tech]
+    resources: [previews, previewsnapshots]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kupra-admin
+rules:
+  - apiGroups: [kupra.futo.tech]
+    resources: [previewapps, previews, previewsnapshots]
+    verbs: [get, list, watch, create, update, patch, delete, deletecollection]
+  - apiGroups: [kupra.futo.tech]
+    resources: [previews]
+    verbs: [snapshot]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kupra-preview-access
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods/exec, pods/portforward]
+    verbs: [get, create]

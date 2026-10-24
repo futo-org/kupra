@@ -1,0 +1,5 @@
+apiVersion: kupra.futo.tech/v1alpha1
+kind: PreviewPolicy
+metadata:
+  name: default
+spec: {}
