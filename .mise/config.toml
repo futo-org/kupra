@@ -6,6 +6,8 @@ lockfile = true
 go = "1.27.3"
 golangci-lint = "2.15.0"
 zizmor = "1.31.1"
+"go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "0.23.0"
+"go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "0.25.2"
 
 [tasks.check]
 description = "Run linters and unit tests"

@@ -13,7 +13,7 @@ permissions: {}
 
 jobs:
   check:
-    name: Lint & unit tests
+    name: Lint & tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,3 +27,12 @@ jobs:
 
       - name: Run checks
         run: mise run check
+
+      - name: Check generated files are up to date
+        run: |
+          mise run generate
+          git add --intent-to-add api charts
+          git diff --exit-code
+
+      - name: Run integration tests
+        run: mise run test:integration
