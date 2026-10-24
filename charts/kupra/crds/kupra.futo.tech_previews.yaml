@@ -17,8 +17,15 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.appRef.name
+      name: App
+      type: string
     - jsonPath: .status.phase
       name: Phase
+      type: string
+    - jsonPath: .status.namespace
+      name: Namespace
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -46,6 +53,45 @@ spec:
           metadata:
             type: object
           spec:
+            properties:
+              appRef:
+                description: AppRef names the PreviewApp in the Preview's namespace.
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: appRef is immutable
+                  rule: self == oldSelf
+              owners:
+                description: Owners can manage the preview, along with whoever created
+                  it.
+                items:
+                  properties:
+                    kind:
+                      enum:
+                      - User
+                      - Group
+                      type: string
+                    name:
+                      minLength: 1
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              parameters:
+                additionalProperties:
+                  x-kubernetes-preserve-unknown-fields: true
+                description: Parameters are values for the PreviewApp's parameters.
+                type: object
+            required:
+            - appRef
             type: object
           status:
             properties:
@@ -108,6 +154,42 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              inventory:
+                description: Inventory lists the resources kupra applied for the preview.
+                items:
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              links:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    url:
+                      type: string
+                  required:
+                  - name
+                  - url
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              namespace:
+                description: Namespace is the namespace the preview's resources run
+                  in.
+                type: string
               observedGeneration:
                 format: int64
                 type: integer
@@ -125,7 +207,12 @@ spec:
                 - Failed
                 type: string
             type: object
+        required:
+        - spec
         type: object
+        x-kubernetes-validations:
+        - message: name must be no more than 63 characters, so it fits in a label
+          rule: self.metadata.name.size() <= 63
     served: true
     storage: true
     subresources:

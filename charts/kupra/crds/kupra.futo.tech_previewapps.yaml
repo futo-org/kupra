@@ -46,6 +46,120 @@ spec:
           metadata:
             type: object
           spec:
+            properties:
+              links:
+                description: Links are shown for each preview, evaluated into its
+                  status.
+                items:
+                  properties:
+                    name:
+                      type: string
+                    urlExpr:
+                      description: URLExpr is a CEL expression that evaluates to the
+                        link's URL.
+                      type: string
+                  required:
+                  - name
+                  - urlExpr
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              parameters:
+                description: Parameters are a preview's inputs, in the order the dashboard
+                  shows them.
+                items:
+                  properties:
+                    default:
+                      description: Default is used when a Preview gives no value.
+                        Optional parameters without a default are the empty value
+                        of their type.
+                      x-kubernetes-preserve-unknown-fields: true
+                    description:
+                      type: string
+                    enum:
+                      description: Enum limits the parameter to these values.
+                      items:
+                        x-kubernetes-preserve-unknown-fields: true
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    name:
+                      pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                      type: string
+                    required:
+                      type: boolean
+                    title:
+                      type: string
+                    type:
+                      default: string
+                      enum:
+                      - string
+                      - integer
+                      - boolean
+                      type: string
+                    uiHint:
+                      description: UIHint asks the dashboard for a special input,
+                        such as a picker for an image's tags.
+                      properties:
+                        repository:
+                          description: Repository is the image repository whose tags
+                            are offered, for the imageTag type.
+                          type: string
+                        type:
+                          enum:
+                          - imageTag
+                          type: string
+                      required:
+                      - type
+                      type: object
+                  required:
+                  - name
+                  - title
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              template:
+                properties:
+                  resources:
+                    description: Resources are the manifests rendered for each preview.
+                      Any field can be given as a CEL expression by adding Expr to
+                      its name.
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                    x-kubernetes-list-type: atomic
+                required:
+                - resources
+                type: object
+              timeout:
+                description: Timeout is how long a preview may take to become ready
+                  before it's marked as stalled. Defaults to 30m.
+                type: string
+              variables:
+                description: Variables are values computed once per preview, each
+                  from the parameters, the preview and the variables before it.
+                items:
+                  properties:
+                    expression:
+                      description: Expression is a CEL expression.
+                      type: string
+                    name:
+                      pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                      type: string
+                  required:
+                  - expression
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            required:
+            - template
             type: object
           status:
             properties:
@@ -112,7 +226,12 @@ spec:
                 format: int64
                 type: integer
             type: object
+        required:
+        - spec
         type: object
+        x-kubernetes-validations:
+        - message: name must be no more than 63 characters, so it fits in a label
+          rule: self.metadata.name.size() <= 63
     served: true
     storage: true
     subresources:

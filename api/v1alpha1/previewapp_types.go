@@ -1,10 +1,109 @@
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-type PreviewAppSpec struct{}
+type PreviewAppSpec struct {
+	// Parameters are a preview's inputs, in the order the dashboard shows them.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Parameters []Parameter `json:"parameters,omitempty"`
+
+	// Variables are values computed once per preview, each from the parameters, the preview and the variables before it.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Variables []Variable `json:"variables,omitempty"`
+
+	// Links are shown for each preview, evaluated into its status.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Links []Link `json:"links,omitempty"`
+
+	// Timeout is how long a preview may take to become ready before it's marked as stalled. Defaults to 30m.
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
+
+	Template Template `json:"template"`
+}
+
+// +kubebuilder:validation:Enum=string;integer;boolean
+type ParameterType string
+
+const (
+	ParameterString  ParameterType = "string"
+	ParameterInteger ParameterType = "integer"
+	ParameterBoolean ParameterType = "boolean"
+)
+
+type Parameter struct {
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	Name string `json:"name"`
+
+	Title string `json:"title"`
+
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// +optional
+	// +kubebuilder:default=string
+	Type ParameterType `json:"type,omitempty"`
+
+	// Enum limits the parameter to these values.
+	// +optional
+	// +listType=atomic
+	Enum []apiextensionsv1.JSON `json:"enum,omitempty"`
+
+	// Default is used when a Preview gives no value. Optional parameters without a default are the empty value of their type.
+	// +optional
+	Default *apiextensionsv1.JSON `json:"default,omitempty"`
+
+	// +optional
+	Required bool `json:"required,omitempty"`
+
+	// UIHint asks the dashboard for a special input, such as a picker for an image's tags.
+	// +optional
+	UIHint *UIHint `json:"uiHint,omitempty"`
+}
+
+// +kubebuilder:validation:Enum=imageTag
+type UIHintType string
+
+const UIHintImageTag UIHintType = "imageTag"
+
+type UIHint struct {
+	Type UIHintType `json:"type"`
+
+	// Repository is the image repository whose tags are offered, for the imageTag type.
+	// +optional
+	Repository string `json:"repository,omitempty"`
+}
+
+type Variable struct {
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	Name string `json:"name"`
+
+	// Expression is a CEL expression.
+	Expression string `json:"expression"`
+}
+
+type Link struct {
+	Name string `json:"name"`
+
+	// URLExpr is a CEL expression that evaluates to the link's URL.
+	URLExpr string `json:"urlExpr"`
+}
+
+type Template struct {
+	// Resources are the manifests rendered for each preview. Any field can be given as a CEL expression by adding Expr to its name.
+	// +listType=atomic
+	Resources []runtime.RawExtension `json:"resources"`
+}
 
 type PreviewAppStatus struct {
 	// +optional
@@ -21,13 +120,14 @@ type PreviewAppStatus struct {
 // +kubebuilder:resource:categories=kupra
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="name must be no more than 63 characters, so it fits in a label"
 
 // PreviewApp describes how to run an app as a preview.
 type PreviewApp struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec PreviewAppSpec `json:"spec,omitempty"`
+	Spec PreviewAppSpec `json:"spec"`
 	// +optional
 	Status PreviewAppStatus `json:"status,omitempty"`
 }

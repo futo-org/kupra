@@ -47,14 +47,26 @@ func TestCRDsInstall(t *testing.T) {
 		t.Fatalf("creating namespace: %v", err)
 	}
 
+	preview := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "preview", Namespace: ns.Name},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+	}
 	for _, obj := range []client.Object{
-		&kuprav1alpha1.PreviewApp{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: ns.Name}},
-		&kuprav1alpha1.Preview{ObjectMeta: metav1.ObjectMeta{Name: "preview", Namespace: ns.Name}},
+		&kuprav1alpha1.PreviewApp{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: ns.Name},
+			Spec:       kuprav1alpha1.PreviewAppSpec{Template: kuprav1alpha1.Template{Resources: []runtime.RawExtension{}}},
+		},
+		preview,
 		&kuprav1alpha1.PreviewSnapshot{ObjectMeta: metav1.ObjectMeta{Name: "snapshot", Namespace: ns.Name}},
 		&kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
 	} {
 		if err := c.Create(ctx, obj); err != nil {
 			t.Errorf("creating %T: %v", obj, err)
 		}
+	}
+
+	preview.Spec.AppRef.Name = "other"
+	if err := c.Update(ctx, preview); err == nil {
+		t.Errorf("changing a Preview's appRef succeeded, want it rejected")
 	}
 }

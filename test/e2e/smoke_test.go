@@ -54,7 +54,10 @@ func TestClusterIsReady(t *testing.T) {
 		}
 	})
 
-	preview := &kuprav1alpha1.Preview{ObjectMeta: metav1.ObjectMeta{Name: "smoke", Namespace: ns.Name}}
+	preview := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "smoke", Namespace: ns.Name},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "smoke"}},
+	}
 	if err := c.Create(ctx, preview); err != nil {
 		t.Errorf("creating a Preview: %v", err)
 	}
