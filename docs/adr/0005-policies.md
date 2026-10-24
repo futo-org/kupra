@@ -1,6 +1,6 @@
 # 5. Policies
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-20
 
 ## Context
@@ -81,6 +81,8 @@ Limits that belong to admins, such as how many previews may run at once, are ant
 ### The role templates are applied with
 
 kupra ships a ClusterRole for templates that covers common workloads: Deployments, StatefulSets, Jobs, Services, ConfigMaps, Secrets, PersistentVolumeClaims, Gateway API routes, and the kinds of state kupra supports. It aggregates any ClusterRole labelled `kupra.futo.tech/aggregate-to-template: "true"`, the way Kubernetes' built-in `edit` and `admin` roles do. So an admin can allow, say, ExternalSecrets or an operator's resources for every app by adding one small ClusterRole, or point a single app's policy at a different role altogether.
+
+kupra can only bind the roles it has been allowed to. It may bind its own template role. An admin who points a policy at a different role must also allow kupra to bind it, with a ClusterRole labelled `kupra.futo.tech/aggregate-to-operator: "true"` that grants `bind` on it. So kupra can never hand out other roles, such as `cluster-admin`, even through a bug. The PreviewApp's checks report a policy role that kupra isn't allowed to bind.
 
 ### How an app gets a policy
 

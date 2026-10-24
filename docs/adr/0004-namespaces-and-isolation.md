@@ -1,6 +1,6 @@
 # 4. Namespaces and isolation
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-20
 
 ## Context
