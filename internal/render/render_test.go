@@ -231,6 +231,20 @@ template:
 			want: "must evaluate to bool, not string",
 		},
 		{
+			name: "include given with Expr",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+        annotations:
+          kupra.futo.tech/includeExpr: '"true"'
+`,
+			want: "kupra.futo.tech/include already holds an expression, so give it as a plain annotation",
+		},
+		{
 			name: "namespace",
 			spec: `
 template:
@@ -457,6 +471,21 @@ template:
 `, `{}`)
 		if err == nil || !strings.Contains(err.Error(), "spec.parameters[level]: Required value: must be one of debug, log") {
 			t.Errorf("error = %v, want it to say a value is required", err)
+		}
+	})
+
+	t.Run("include from an expression", func(t *testing.T) {
+		_, err := render(t, `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+        annotationsExpr: '{"kupra.futo.tech/include": "false"}'
+`, `{}`)
+		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/include can't be given by an expression") {
+			t.Errorf("error = %v, want it to say the include can't come from an expression", err)
 		}
 	})
 

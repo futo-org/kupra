@@ -184,6 +184,9 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 			}
 			r.include = prg
 		}
+		if _, ok := annotations[IncludeAnnotation+exprSuffix]; ok {
+			errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(IncludeAnnotation+exprSuffix), fmt.Sprintf("%s already holds an expression, so give it as a plain annotation", IncludeAnnotation)))
+		}
 	}
 	errs = append(errs, compileFields(e, obj, fldPath, nil, r)...)
 	return r, errs
@@ -282,6 +285,10 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 			return nil, err
 		}
 		u := &unstructured.Unstructured{Object: obj}
+		// Whether to include a resource is decided before rendering it, so the annotation can't come from metadata.annotationsExpr.
+		if _, ok := u.GetAnnotations()[IncludeAnnotation]; ok && r.include == nil {
+			return nil, fmt.Errorf("%s: %s can't be given by an expression", r.path.Child("metadata", "annotationsExpr"), IncludeAnnotation)
+		}
 		if u.GetName() == "" {
 			return nil, fmt.Errorf("%s: name is required", r.path.Child("metadata", "name"))
 		}
