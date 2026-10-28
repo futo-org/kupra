@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -15,28 +16,16 @@ type PreviewSpec struct {
 	// +optional
 	Parameters map[string]apiextensionsv1.JSON `json:"parameters,omitempty"`
 
-	// Owners can manage the preview, along with whoever created it.
+	// Owners can manage the preview, along with whoever created it. As in RoleBindings, apiGroup defaults to rbac.authorization.k8s.io for users and groups.
 	// +optional
 	// +listType=atomic
-	Owners []Owner `json:"owners,omitempty"`
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind in ['User', 'Group', 'ServiceAccount'])",message="owners must be users, groups or service accounts"
+	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind != 'ServiceAccount' || has(s.__namespace__))",message="service account owners need a namespace"
+	Owners []rbacv1.Subject `json:"owners,omitempty"`
 }
 
 type LocalObjectReference struct {
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-}
-
-// +kubebuilder:validation:Enum=User;Group
-type OwnerKind string
-
-const (
-	OwnerUser  OwnerKind = "User"
-	OwnerGroup OwnerKind = "Group"
-)
-
-type Owner struct {
-	Kind OwnerKind `json:"kind"`
-
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 }

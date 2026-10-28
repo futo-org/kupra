@@ -129,7 +129,7 @@ template:
 
 	t.Run("owners and admins added later", func(t *testing.T) {
 		p := getPreview(t, "access", preview.Name)
-		p.Spec.Owners = []kuprav1alpha1.Owner{{Kind: kuprav1alpha1.OwnerGroup, Name: "reviewers"}}
+		p.Spec.Owners = []rbacv1.Subject{{Kind: rbacv1.GroupKind, Name: "reviewers"}}
 		if err := k8s.Update(ctx, p); err != nil {
 			t.Fatal(err)
 		}

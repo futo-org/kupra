@@ -68,23 +68,45 @@ spec:
                   rule: self == oldSelf
               owners:
                 description: Owners can manage the preview, along with whoever created
-                  it.
+                  it. As in RoleBindings, apiGroup defaults to rbac.authorization.k8s.io
+                  for users and groups.
                 items:
+                  description: |-
+                    Subject contains a reference to the object or user identities a role binding applies to.  This can either hold a direct API object reference,
+                    or a value for non-objects such as user and group names.
                   properties:
+                    apiGroup:
+                      description: |-
+                        apiGroup holds the API group of the referenced subject.
+                        Defaults to "" for ServiceAccount subjects.
+                        Defaults to "rbac.authorization.k8s.io" for User and Group subjects.
+                      type: string
                     kind:
-                      enum:
-                      - User
-                      - Group
+                      description: |-
+                        kind of object being referenced. Values defined by this API group are "User", "Group", and "ServiceAccount".
+                        If the Authorizer does not recognized the kind value, the Authorizer should report an error.
                       type: string
                     name:
-                      minLength: 1
+                      description: name of the object being referenced.
+                      type: string
+                    namespace:
+                      description: |-
+                        namespace of the referenced object.  If the object kind is non-namespace, such as "User" or "Group", and this value is not empty
+                        the Authorizer should report an error.
                       type: string
                   required:
                   - kind
                   - name
                   type: object
+                  x-kubernetes-map-type: atomic
+                maxItems: 32
                 type: array
                 x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: owners must be users, groups or service accounts
+                  rule: self.all(s, s.kind in ['User', 'Group', 'ServiceAccount'])
+                - message: service account owners need a namespace
+                  rule: self.all(s, s.kind != 'ServiceAccount' || has(s.__namespace__))
               parameters:
                 additionalProperties:
                   x-kubernetes-preserve-unknown-fields: true

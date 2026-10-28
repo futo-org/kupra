@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -245,6 +246,36 @@ func TestExamplesAreAccepted(t *testing.T) {
 			if err := k8s.Create(ctx, &u, client.DryRunAll); err != nil {
 				t.Errorf("%s: %v", filepath.Base(file), err)
 			}
+		}
+	}
+}
+
+func TestOwnerValidation(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "owners", nil)
+	for _, tc := range []struct {
+		owner rbacv1.Subject
+		ok    bool
+	}{
+		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "github:octocat"}, ok: true},
+		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"}, ok: true},
+		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Namespace: "flux-system", Name: "flux"}, ok: true},
+		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "flux"}, ok: false},
+		{owner: rbacv1.Subject{Kind: "Robot", Name: "r2d2"}, ok: false},
+	} {
+		p := &kuprav1alpha1.Preview{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "preview-", Namespace: "owners"},
+			Spec: kuprav1alpha1.PreviewSpec{
+				AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"},
+				Owners: []rbacv1.Subject{tc.owner},
+			},
+		}
+		err := k8s.Create(ctx, p, client.DryRunAll)
+		if tc.ok && err != nil {
+			t.Errorf("owner %+v: %v", tc.owner, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("owner %+v was accepted, want it rejected", tc.owner)
 		}
 	}
 }

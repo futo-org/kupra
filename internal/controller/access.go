@@ -92,12 +92,10 @@ func ownerSubjects(p *kuprav1alpha1.Preview) []rbacv1.Subject {
 		subjects = append(subjects, userSubject(creator))
 	}
 	for _, o := range p.Spec.Owners {
-		switch o.Kind {
-		case kuprav1alpha1.OwnerGroup:
-			subjects = append(subjects, rbacv1.Subject{APIGroup: rbacv1.GroupName, Kind: rbacv1.GroupKind, Name: o.Name})
-		default:
-			subjects = append(subjects, userSubject(o.Name))
+		if o.APIGroup == "" && (o.Kind == rbacv1.UserKind || o.Kind == rbacv1.GroupKind) {
+			o.APIGroup = rbacv1.GroupName
 		}
+		subjects = append(subjects, o)
 	}
 	return union(nil, subjects)
 }
