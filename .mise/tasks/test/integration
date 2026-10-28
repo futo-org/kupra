@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run integration tests"
+set -euo pipefail
+
+k8s_minor="$(go list -m -f '{{.Version}}' k8s.io/api | cut -d. -f2)"
+KUBEBUILDER_ASSETS="$(setup-envtest use --print path "1.$k8s_minor")"
+export KUBEBUILDER_ASSETS
+go test -tags integration ./...

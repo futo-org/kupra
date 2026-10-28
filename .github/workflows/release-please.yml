@@ -1,0 +1,33 @@
+name: Release Please
+
+on:
+  workflow_dispatch: # For manual runs
+  release: # To update release PRs when one is merged
+    types: [published]
+  pull_request: # To handle the release label being removed
+    types: [unlabeled]
+  push: # Standard workflow
+    branches:
+      - main
+
+concurrency: release-please
+
+permissions: {}
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.PUSH_O_MATIC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PUSH_O_MATIC_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.generate-token.outputs.token }}

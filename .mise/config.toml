@@ -1,0 +1,24 @@
+[settings]
+pin = true
+lockfile = true
+
+[tools]
+go = "1.27.3"
+golangci-lint = "2.15.0"
+zizmor = "1.31.1"
+"go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "0.23.0"
+"go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "0.25.2"
+kind = "0.33.0"
+kubectl = "1.37.1"
+
+[env]
+# renovate: datasource=github-releases depName=kubernetes-csi/external-snapshotter
+E2E_SNAPSHOTTER_VERSION = "v8.7.0"
+# renovate: datasource=github-releases depName=kubernetes-csi/csi-driver-host-path
+E2E_CSI_HOSTPATH_VERSION = "v1.19.0"
+# renovate: datasource=github-releases depName=cloudnative-pg/cloudnative-pg
+E2E_CNPG_VERSION = "v1.30.1"
+
+[tasks.check]
+description = "Run linters and unit tests"
+depends = ["lint:*", "test:unit"]

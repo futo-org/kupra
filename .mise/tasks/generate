@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Generate deepcopy code and CRDs"
+set -euo pipefail
+
+controller-gen object paths=./api/...
+controller-gen crd paths=./api/... output:crd:artifacts:config=charts/kupra/crds
