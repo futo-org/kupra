@@ -133,6 +133,10 @@ func fits(s *spec.Schema, t *cel.Type) bool {
 	if intOrString(s) {
 		return slices.Contains([]types.Kind{types.IntKind, types.UintKind, types.StringKind}, t.Kind())
 	}
+	// Built-in types like IntOrString and Quantity are a oneOf with no type of their own.
+	if schemaType(s) == "" && len(s.OneOf) > 0 {
+		return slices.ContainsFunc(s.OneOf, func(branch spec.Schema) bool { return fits(&branch, t) })
+	}
 	switch schemaType(s) {
 	case "string":
 		switch s.Format {
@@ -185,6 +189,13 @@ func schemaType(s *spec.Schema) string {
 func describe(s *spec.Schema) string {
 	if intOrString(s) {
 		return "an integer or a string"
+	}
+	if schemaType(s) == "" && len(s.OneOf) > 0 {
+		var branches []string
+		for _, branch := range s.OneOf {
+			branches = append(branches, describe(&branch))
+		}
+		return strings.Join(branches, " or ")
 	}
 	switch schemaType(s) {
 	case "string":

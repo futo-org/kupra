@@ -56,6 +56,16 @@ properties:
                       type: array
                       items:
                         type: string
+                    ports:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          targetPort:
+                            format: int-or-string
+                            oneOf:
+                              - type: integer
+                              - type: string
                     resources:
                       type: object
                       properties:
@@ -91,6 +101,9 @@ func TestFieldSchemaAndFits(t *testing.T) {
 		{path: []any{"spec", "template", "spec", "containers", 0, "resources", "limits", "memory"}, t: cel.IntType, fits: true},
 		{path: []any{"spec", "template", "spec", "containers", 0, "resources", "limits", "memory"}, t: cel.BoolType, fits: false},
 		{path: []any{"status", "anything", "goes"}, t: cel.BoolType, fits: true},
+		{path: []any{"spec", "template", "spec", "containers", 0, "ports", 0, "targetPort"}, t: cel.IntType, fits: true},
+		{path: []any{"spec", "template", "spec", "containers", 0, "ports", 0, "targetPort"}, t: cel.StringType, fits: true},
+		{path: []any{"spec", "template", "spec", "containers", 0, "ports", 0, "targetPort"}, t: cel.BoolType, fits: false},
 		{path: []any{"spec", "template", "spec", "containers", 0, "imag"}, wantErr: "there's no field imag"},
 		{path: []any{"spec", "templat", "spec"}, wantErr: "there's no field templat at spec.templat"},
 	} {

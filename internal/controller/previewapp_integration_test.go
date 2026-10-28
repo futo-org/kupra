@@ -133,12 +133,21 @@ template:
       kind: ServiceAccount
       metadata:
         name: server
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: server
+      spec:
+        ports:
+          - port: 80
+            targetPortExpr: 'true'
 `)
 	waitForReady(t, invalid, metav1.ConditionFalse, "CheckFailed",
 		"spec.template.resources[0].spec.replicasExpr: Invalid value: \"string\": must evaluate to an integer",
 		"spec.template.resources[0].spec.template.spec.containers[0].imagExpr: Invalid value: \"imag\": there's no field imag",
 		"spec.template.resources[1].kind: Forbidden: ClusterRole is cluster-scoped",
 		"spec.template.resources[2].kind: Forbidden: the policy's ClusterRole kupra-preview-template-base doesn't allow get, create, patch, delete on serviceaccounts",
+		`spec.template.resources[3].spec.ports[0].targetPortExpr: Invalid value: "bool": must evaluate to an integer or a string`,
 	)
 
 	uncompiled := createApp(t, "checks", "uncompiled", `
