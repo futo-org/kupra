@@ -74,7 +74,7 @@ parameters:
   - name: replicas
     title: Replicas
     type: integer
-    default: 1
+    default: "1"
 variables:
   - name: host
     expression: preview.name + ".example.com"

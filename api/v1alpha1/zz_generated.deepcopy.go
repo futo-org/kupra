@@ -6,8 +6,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -139,15 +138,13 @@ func (in *Parameter) DeepCopyInto(out *Parameter) {
 	*out = *in
 	if in.Enum != nil {
 		in, out := &in.Enum, &out.Enum
-		*out = make([]v1.JSON, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 	if in.Default != nil {
 		in, out := &in.Default, &out.Default
-		*out = new(v1.JSON)
-		(*in).DeepCopyInto(*out)
+		*out = new(string)
+		**out = **in
 	}
 	if in.UIHint != nil {
 		in, out := &in.UIHint, &out.UIHint
@@ -569,14 +566,14 @@ func (in *PreviewSpec) DeepCopyInto(out *PreviewSpec) {
 	out.AppRef = in.AppRef
 	if in.Parameters != nil {
 		in, out := &in.Parameters, &out.Parameters
-		*out = make(map[string]v1.JSON, len(*in))
+		*out = make(map[string]string, len(*in))
 		for key, val := range *in {
-			(*out)[key] = *val.DeepCopy()
+			(*out)[key] = val
 		}
 	}
 	if in.Owners != nil {
 		in, out := &in.Owners, &out.Owners
-		*out = make([]rbacv1.Subject, len(*in))
+		*out = make([]v1.Subject, len(*in))
 		copy(*out, *in)
 	}
 }

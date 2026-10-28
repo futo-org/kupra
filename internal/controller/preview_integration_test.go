@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,10 +47,6 @@ func waitForPhase(t *testing.T, namespace, name string, phase kuprav1alpha1.Prev
 	return &p
 }
 
-func jsonValue(raw string) apiextensionsv1.JSON {
-	return apiextensionsv1.JSON{Raw: []byte(raw)}
-}
-
 func TestPreviews(t *testing.T) {
 	ctx := context.Background()
 	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{
@@ -70,7 +65,7 @@ parameters:
   - name: service
     title: Service
     type: boolean
-    default: true
+    default: "true"
 variables:
   - name: host
     expression: preview.name + ".example.com"
@@ -178,7 +173,7 @@ template:
 
 	t.Run("update", func(t *testing.T) {
 		p := getPreview(t, "previews", "pr-1")
-		p.Spec.Parameters = map[string]apiextensionsv1.JSON{"greeting": jsonValue(`"hi"`), "service": jsonValue(`false`)}
+		p.Spec.Parameters = map[string]string{"greeting": "hi", "service": "false"}
 		if err := k8s.Update(ctx, p); err != nil {
 			t.Fatal(err)
 		}

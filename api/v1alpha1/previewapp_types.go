@@ -1,7 +1,6 @@
 package v1alpha1
 
 import (
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -61,11 +60,11 @@ type Parameter struct {
 	// Enum limits the parameter to these values.
 	// +optional
 	// +listType=atomic
-	Enum []apiextensionsv1.JSON `json:"enum,omitempty"`
+	Enum []string `json:"enum,omitempty"`
 
 	// Default is used when a Preview gives no value. Optional parameters without a default are the empty value of their type.
 	// +optional
-	Default *apiextensionsv1.JSON `json:"default,omitempty"`
+	Default *string `json:"default,omitempty"`
 
 	// +optional
 	Required bool `json:"required,omitempty"`

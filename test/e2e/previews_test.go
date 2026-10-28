@@ -11,7 +11,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,7 +26,7 @@ parameters:
   - name: replicas
     title: Replicas
     type: integer
-    default: 1
+    default: "1"
 variables:
   - name: host
     expression: preview.name + ".example.com"
@@ -128,7 +127,7 @@ func TestPreviewLifecycle(t *testing.T) {
 		t.Errorf("default network policy: %v", err)
 	}
 
-	preview.Spec.Parameters = map[string]apiextensionsv1.JSON{"replicas": {Raw: []byte("2")}}
+	preview.Spec.Parameters = map[string]string{"replicas": "2"}
 	if err := k8s.Update(ctx, preview); err != nil {
 		t.Fatal(err)
 	}

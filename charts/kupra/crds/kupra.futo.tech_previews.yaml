@@ -109,8 +109,10 @@ spec:
                   rule: self.all(s, s.kind != 'ServiceAccount' || has(s.__namespace__))
               parameters:
                 additionalProperties:
-                  x-kubernetes-preserve-unknown-fields: true
+                  type: string
                 description: Parameters are values for the PreviewApp's parameters.
+                  Like environment variables, they're strings, whatever the parameter's
+                  type.
                 type: object
             required:
             - appRef

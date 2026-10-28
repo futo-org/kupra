@@ -11,7 +11,7 @@
 
 ### Parameters
 
-A PreviewApp's `parameters` are an ordered list. Each has a `name`, a `title` and optionally a `description`. Its `type` is `string` (the default), `integer` or `boolean`, optionally limited by an `enum`, with an optional `default`, and it can be `required`. A `uiHint` asks the dashboard for a special picker, such as an image's tags. The order is the order of the dashboard's form.
+A PreviewApp's `parameters` are an ordered list. Each has a `name`, a `title` and optionally a `description`. Its `type` is `string` (the default), `integer` or `boolean`, optionally limited by an `enum`, with an optional `default`, and it can be `required`. Values are given as strings, like environment variables, and parsed by type. A `uiHint` asks the dashboard for a special picker, such as an image's tags. The order is the order of the dashboard's form.
 
 ```yaml
 parameters:
@@ -29,7 +29,7 @@ parameters:
   - name: machineLearning
     title: Machine learning
     type: boolean
-    default: true
+    default: "true"
 ```
 
 This is deliberately much smaller than a full JSON schema. It's shaped by what a creation form needs, much like GitHub's issue forms. kupra checks a Preview's parameters against them and reports problems on the Preview's status. The dashboard checks them before submitting.

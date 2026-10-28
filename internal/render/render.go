@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -221,7 +220,7 @@ func compileFields(e *env, value any, fldPath *field.Path, target []any, r *reso
 }
 
 // Render renders a preview's resources and links from the Preview's parameter values.
-func (a *App) Render(preview Preview, values map[string]apiextensionsv1.JSON) (*Result, error) {
+func (a *App) Render(preview Preview, values map[string]string) (*Result, error) {
 	params, errs := resolveParameters(a.parameters, values, field.NewPath("spec", "parameters"))
 	if len(errs) > 0 {
 		return nil, errs.ToAggregate()

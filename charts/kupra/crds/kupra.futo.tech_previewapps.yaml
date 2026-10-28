@@ -75,13 +75,13 @@ spec:
                       description: Default is used when a Preview gives no value.
                         Optional parameters without a default are the empty value
                         of their type.
-                      x-kubernetes-preserve-unknown-fields: true
+                      type: string
                     description:
                       type: string
                     enum:
                       description: Enum limits the parameter to these values.
                       items:
-                        x-kubernetes-preserve-unknown-fields: true
+                        type: string
                       type: array
                       x-kubernetes-list-type: atomic
                     name:

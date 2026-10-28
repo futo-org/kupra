@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
@@ -25,9 +24,9 @@ func appSpec(t *testing.T, doc string) *kuprav1alpha1.PreviewAppSpec {
 	return &spec
 }
 
-func values(t *testing.T, doc string) map[string]apiextensionsv1.JSON {
+func values(t *testing.T, doc string) map[string]string {
 	t.Helper()
-	var v map[string]apiextensionsv1.JSON
+	var v map[string]string
 	if err := yaml.Unmarshal([]byte(doc), &v); err != nil {
 		t.Fatalf("parsing values: %v", err)
 	}
@@ -49,7 +48,7 @@ parameters:
   - name: replicas
     title: Replicas
     type: integer
-    default: 2
+    default: "2"
   - name: logLevel
     title: Log level
     enum: [debug, log]
@@ -263,7 +262,7 @@ parameters:
 template:
   resources: []
 `,
-			want: "spec.parameters[replicas].default: Invalid value: \"\\\"two\\\"\": must be an integer",
+			want: `spec.parameters[replicas].default: Invalid value: "two": must be an integer`,
 		},
 		{
 			name: "default outside the enum",
@@ -324,7 +323,7 @@ template:
 	}{
 		{name: "missing required parameter", values: `{}`, want: "spec.parameters[tag]: Required value"},
 		{name: "unknown parameter", values: `{tag: a, colour: red}`, want: "spec.parameters[colour]: Not found"},
-		{name: "wrong type", values: `{tag: a, replicas: "2"}`, want: "spec.parameters[replicas]: Invalid value: \"\\\"2\\\"\": must be an integer"},
+		{name: "wrong type", values: `{tag: a, replicas: two}`, want: `spec.parameters[replicas]: Invalid value: "two": must be an integer`},
 		{name: "not in the enum", values: `{tag: a, level: verbose}`, want: "spec.parameters[level]: Unsupported value: \"verbose\""},
 		{name: "duplicate resources", values: `{tag: config}`, want: "more than one ConfigMap named config"},
 	} {

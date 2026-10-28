@@ -1,13 +1,11 @@
 package render
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
@@ -18,21 +16,17 @@ func checkParameters(params []kuprav1alpha1.Parameter, fldPath *field.Path) fiel
 	var errs field.ErrorList
 	for _, p := range params {
 		pPath := fldPath.Key(string(p.Name))
-		var enum []any
 		for i, raw := range p.Enum {
-			v, err := parameterValue(p.Type, raw)
-			if err != nil {
-				errs = append(errs, field.Invalid(pPath.Child("enum").Index(i), string(raw.Raw), err.Error()))
-				continue
+			if _, err := parameterValue(p.Type, raw); err != nil {
+				errs = append(errs, field.Invalid(pPath.Child("enum").Index(i), raw, err.Error()))
 			}
-			enum = append(enum, v)
 		}
 		if p.Default != nil {
 			v, err := parameterValue(p.Type, *p.Default)
 			if err != nil {
-				errs = append(errs, field.Invalid(pPath.Child("default"), string(p.Default.Raw), err.Error()))
-			} else if len(p.Enum) > 0 && !slices.Contains(enum, v) {
-				errs = append(errs, field.NotSupported(pPath.Child("default"), v, display(enum)))
+				errs = append(errs, field.Invalid(pPath.Child("default"), *p.Default, err.Error()))
+			} else if len(p.Enum) > 0 && !slices.Contains(enumValues(p), v) {
+				errs = append(errs, field.NotSupported(pPath.Child("default"), *p.Default, p.Enum))
 			}
 		}
 	}
@@ -40,7 +34,7 @@ func checkParameters(params []kuprav1alpha1.Parameter, fldPath *field.Path) fiel
 }
 
 // resolveParameters checks a Preview's parameter values against the PreviewApp's definitions, and fills in defaults.
-func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiextensionsv1.JSON, fldPath *field.Path) (map[string]any, field.ErrorList) {
+func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]string, fldPath *field.Path) (map[string]any, field.ErrorList) {
 	var errs field.ErrorList
 	for name := range values {
 		if !slices.ContainsFunc(params, func(p kuprav1alpha1.Parameter) bool { return string(p.Name) == name }) {
@@ -63,7 +57,7 @@ func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiex
 		default:
 			v := zeroValue(p.Type)
 			if len(enum) > 0 && !slices.Contains(enum, v) {
-				errs = append(errs, field.Required(pPath, "must be one of "+strings.Join(display(enum), ", ")))
+				errs = append(errs, field.Required(pPath, "must be one of "+strings.Join(p.Enum, ", ")))
 				continue
 			}
 			out[string(p.Name)] = v
@@ -72,11 +66,11 @@ func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiex
 
 		v, err := parameterValue(p.Type, raw)
 		if err != nil {
-			errs = append(errs, field.Invalid(pPath, string(raw.Raw), err.Error()))
+			errs = append(errs, field.Invalid(pPath, raw, err.Error()))
 			continue
 		}
 		if len(enum) > 0 && !slices.Contains(enum, v) {
-			errs = append(errs, field.NotSupported(pPath, v, display(enum)))
+			errs = append(errs, field.NotSupported(pPath, raw, p.Enum))
 			continue
 		}
 		out[string(p.Name)] = v
@@ -84,36 +78,25 @@ func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiex
 	return out, errs
 }
 
-func parameterValue(t kuprav1alpha1.ParameterType, raw apiextensionsv1.JSON) (any, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw.Raw))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
-		return nil, err
-	}
+// parameterValue parses a parameter's value, which is always given as a string, by the parameter's type.
+func parameterValue(t kuprav1alpha1.ParameterType, raw string) (any, error) {
 	switch t {
 	case kuprav1alpha1.ParameterInteger:
-		n, ok := v.(json.Number)
-		if !ok {
-			return nil, fmt.Errorf("must be an integer")
-		}
-		i, err := n.Int64()
+		i, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("must be an integer")
 		}
 		return i, nil
 	case kuprav1alpha1.ParameterBoolean:
-		b, ok := v.(bool)
-		if !ok {
-			return nil, fmt.Errorf("must be a boolean")
+		switch raw {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
 		}
-		return b, nil
+		return nil, fmt.Errorf(`must be "true" or "false"`)
 	default:
-		s, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("must be a string")
-		}
-		return s, nil
+		return raw, nil
 	}
 }
 
@@ -136,12 +119,4 @@ func zeroValue(t kuprav1alpha1.ParameterType) any {
 	default:
 		return ""
 	}
-}
-
-func display(values []any) []string {
-	out := make([]string, len(values))
-	for i, v := range values {
-		out[i] = fmt.Sprint(v)
-	}
-	return out
 }

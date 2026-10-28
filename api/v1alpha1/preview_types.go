@@ -3,7 +3,6 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -12,9 +11,9 @@ type PreviewSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="appRef is immutable"
 	AppRef LocalObjectReference `json:"appRef"`
 
-	// Parameters are values for the PreviewApp's parameters.
+	// Parameters are values for the PreviewApp's parameters. Like environment variables, they're strings, whatever the parameter's type.
 	// +optional
-	Parameters map[string]apiextensionsv1.JSON `json:"parameters,omitempty"`
+	Parameters map[string]string `json:"parameters,omitempty"`
 
 	// Owners can manage the preview, along with whoever created it. As in RoleBindings, apiGroup defaults to rbac.authorization.k8s.io for users and groups.
 	// +optional

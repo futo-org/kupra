@@ -15,7 +15,7 @@ spec:
     - name: machineLearning
       title: Machine learning
       type: boolean
-      default: true
+      default: "true"
 
   variables:
     - name: host
