@@ -255,7 +255,7 @@ func (r *PreviewReconciler) confine(ctx context.Context, p *kuprav1alpha1.Previe
 	if err := r.applyPolicy(ctx, namespace, settings); err != nil {
 		return "", "", err
 	}
-	return "", "", r.ensureApplyAccount(ctx, p, namespace, account, settings.Apply.ClusterRoleRef.Name)
+	return r.ensureApplyAccount(ctx, p, namespace, account, settings.Apply.ClusterRoleRef.Name)
 }
 
 // ensureNamespace creates or updates the preview's namespace. It returns a reason when the namespace can't be used yet.
@@ -340,7 +340,7 @@ func (r *PreviewReconciler) applyOrDelete(ctx context.Context, obj client.Object
 }
 
 // ensureApplyAccount sets up the service account templates are applied as, bound to the policy's role within the preview namespace. It lives in kupra's namespace, so the preview's own pods can't use it.
-func (r *PreviewReconciler) ensureApplyAccount(ctx context.Context, p *kuprav1alpha1.Preview, namespace, name, role string) error {
+func (r *PreviewReconciler) ensureApplyAccount(ctx context.Context, p *kuprav1alpha1.Preview, namespace, name, role string) (reason, message string, err error) {
 	account := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
 		Name:        name,
 		Namespace:   r.Namespace,
@@ -348,19 +348,23 @@ func (r *PreviewReconciler) ensureApplyAccount(ctx context.Context, p *kuprav1al
 		Annotations: map[string]string{AnnotationPreviewUID: string(p.UID)},
 	}}
 	if err := r.applyObject(ctx, r.Client, account); err != nil {
-		return err
+		return "", "", err
+	}
+
+	// A role kupra can't use leaves the existing binding in place, so a broken policy doesn't take running previews down with it.
+	if _, reason, message, err := templateRole(ctx, r.Client, role); err != nil || reason != "" {
+		return reason, message, err
 	}
 
 	var existing rbacv1.RoleBinding
-	err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: templateBindingName}, &existing)
-	switch {
+	switch err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: templateBindingName}, &existing); {
 	case apierrors.IsNotFound(err):
 	case err != nil:
-		return err
+		return "", "", err
 	case existing.RoleRef.Name != role:
 		// A RoleBinding's roleRef can't be changed, so replace the binding when the policy's role changes.
 		if err := client.IgnoreNotFound(r.Delete(ctx, &existing)); err != nil {
-			return err
+			return "", "", err
 		}
 	}
 	binding := &rbacv1.RoleBinding{
@@ -368,7 +372,7 @@ func (r *PreviewReconciler) ensureApplyAccount(ctx context.Context, p *kuprav1al
 		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role},
 		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: r.Namespace, Name: name}},
 	}
-	return r.applyObject(ctx, r.Client, binding)
+	return "", "", r.applyObject(ctx, r.Client, binding)
 }
 
 func (r *PreviewReconciler) impersonate(account string) (client.Client, error) {

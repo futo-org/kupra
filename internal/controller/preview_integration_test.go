@@ -268,6 +268,28 @@ template:
 		})
 	})
 
+	t.Run("policy role that doesn't exist", func(t *testing.T) {
+		setRole := func(role *kuprav1alpha1.ApplySettings) {
+			t.Helper()
+			var pol kuprav1alpha1.PreviewPolicy
+			if err := k8s.Get(ctx, client.ObjectKey{Name: "previews"}, &pol); err != nil {
+				t.Fatal(err)
+			}
+			pol.Spec.Apply = role
+			if err := k8s.Update(ctx, &pol); err != nil {
+				t.Fatal(err)
+			}
+		}
+		setRole(&kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: "missing"}})
+		waitForPhase(t, "previews", "pr-1", kuprav1alpha1.PreviewPending, "ClusterRoleNotFound")
+		var binding rbacv1.RoleBinding
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "kupra-template"}, &binding); err != nil || binding.RoleRef.Name != "kupra-preview-template-base" {
+			t.Errorf("template binding = %+v, %v; want it left bound to the old role", binding.RoleRef, err)
+		}
+		setRole(nil)
+		waitForPhase(t, "previews", "pr-1", kuprav1alpha1.PreviewRunning, "Succeeded")
+	})
+
 	t.Run("namespace conflict", func(t *testing.T) {
 		conflict := controller.PreviewNamespaceName("previews", "taken")
 		createNamespace(t, conflict, nil)

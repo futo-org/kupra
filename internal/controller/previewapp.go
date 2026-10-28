@@ -3,13 +3,10 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
-	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
@@ -104,22 +101,9 @@ func (r *PreviewAppReconciler) check(ctx context.Context, app *kuprav1alpha1.Pre
 	}
 
 	roleName := settings.Apply.ClusterRoleRef.Name
-	var role rbacv1.ClusterRole
-	if err := r.Get(ctx, client.ObjectKey{Name: roleName}, &role); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ReasonClusterRoleNotFound, fmt.Sprintf("the policy's ClusterRole %s doesn't exist", roleName), nil
-		}
-		return "", "", err
-	}
-
-	review := &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-		ResourceAttributes: &authorizationv1.ResourceAttributes{Verb: "bind", Group: rbacv1.GroupName, Resource: "clusterroles", Name: roleName},
-	}}
-	if err := r.Create(ctx, review); err != nil {
-		return "", "", err
-	}
-	if !review.Status.Allowed {
-		return ReasonCannotBindRole, fmt.Sprintf("kupra isn't allowed to bind the policy's ClusterRole %s. Allow it with a ClusterRole labelled %s that grants bind on it.", roleName, LabelAggregateToOperator), nil
+	role, reason, message, err := templateRole(ctx, r.Client, roleName)
+	if err != nil || reason != "" {
+		return reason, message, err
 	}
 
 	errs = r.Checker.Template(compiled, roleName, role.Rules)
