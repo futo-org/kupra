@@ -263,6 +263,9 @@ func TestOwnerValidation(t *testing.T) {
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Namespace: "flux-system", Name: "flux"}, ok: true},
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "flux"}, ok: false},
 		{owner: rbacv1.Subject{Kind: "Robot", Name: "r2d2"}, ok: false},
+		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:unauthenticated"}, ok: false},
+		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:authenticated"}, ok: false},
+		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, Name: "system:anonymous"}, ok: false},
 	} {
 		p := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{GenerateName: "preview-", Namespace: "owners"},

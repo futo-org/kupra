@@ -21,6 +21,7 @@ type PreviewSpec struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind in ['User', 'Group', 'ServiceAccount'])",message="owners must be users, groups or service accounts"
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind != 'ServiceAccount' || has(s.__namespace__))",message="service account owners need a namespace"
+	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners can't be system users or groups, such as system:authenticated"
 	Owners []rbacv1.Subject `json:"owners,omitempty"`
 }
 
