@@ -2,12 +2,13 @@ package render
 
 import (
 	"fmt"
-	"math"
+	"reflect"
 
 	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
+	"k8s.io/apimachinery/pkg/util/json"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/cel/environment"
 
@@ -82,55 +83,19 @@ func (e *env) compile(expression string, want *cel.Type) (*program, error) {
 	return &program{Program: prg, outputType: ast.OutputType()}, nil
 }
 
-// native converts an expression's result into a value that can go into an unstructured object.
+// native converts an expression's result into a value for an unstructured object. It goes through CEL's JSON mapping, as MutatingAdmissionPolicy does for JSON patch values, and decodes whole numbers as integers the way Kubernetes does.
 func native(v ref.Val) (any, error) {
-	switch v := v.(type) {
-	case types.Null:
-		return nil, nil
-	case types.Bool:
-		return bool(v), nil
-	case types.Int:
-		return int64(v), nil
-	case types.Uint:
-		if uint64(v) > math.MaxInt64 {
-			return nil, fmt.Errorf("%d is too large", uint64(v))
-		}
-		return int64(v), nil
-	case types.Double:
-		return float64(v), nil
-	case types.String:
-		return string(v), nil
-	case traits.Lister:
-		var out []any
-		for it := v.Iterator(); it.HasNext() == types.True; {
-			item, err := native(it.Next())
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, item)
-		}
-		if out == nil {
-			out = []any{}
-		}
-		return out, nil
-	case traits.Mapper:
-		out := map[string]any{}
-		for it := v.Iterator(); it.HasNext() == types.True; {
-			key := it.Next()
-			k, ok := key.(types.String)
-			if !ok {
-				return nil, fmt.Errorf("map keys must be strings, not %s", key.Type().TypeName())
-			}
-			item, err := native(v.Get(key))
-			if err != nil {
-				return nil, err
-			}
-			out[string(k)] = item
-		}
-		return out, nil
+	pb, err := v.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+	if err != nil {
+		return nil, err
 	}
-	if s, ok := v.ConvertToType(types.StringType).(types.String); ok {
-		return string(s), nil
+	data, err := protojson.Marshal(pb.(*structpb.Value))
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("unsupported result type %s", v.Type().TypeName())
+	var out any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
