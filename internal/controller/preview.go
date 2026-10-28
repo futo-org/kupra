@@ -402,7 +402,7 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 		if slices.ContainsFunc(current, func(c corev1.TypedLocalObjectReference) bool { return sameObject(c, ref) }) {
 			continue
 		}
-		if isVolumeClaim(refGroup(ref), ref.Kind) {
+		if isState(refGroup(ref), ref.Kind) {
 			retained = append(retained, ref)
 			continue
 		}
@@ -425,7 +425,8 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 	return retained, errors.Join(errs...)
 }
 
-func isVolumeClaim(group, kind string) bool {
+// isState reports whether a kind of resource holds state, which kupra keeps when it drops out of a template. For now, that's only PersistentVolumeClaims.
+func isState(group, kind string) bool {
 	return group == "" && kind == "PersistentVolumeClaim"
 }
 
@@ -434,7 +435,7 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 	var waiting []string
 	for _, obj := range objs {
 		// A claim is ready once it exists: storage that binds volumes when a pod first uses them would otherwise never be ready.
-		if isVolumeClaim(obj.GroupVersionKind().Group, obj.GetKind()) {
+		if gvk := obj.GroupVersionKind(); gvk.Group == "" && gvk.Kind == "PersistentVolumeClaim" {
 			continue
 		}
 		live := &unstructured.Unstructured{}
