@@ -11,8 +11,6 @@ type PreviewPolicySpec struct {
 	// +optional
 	Apply *ApplySettings `json:"apply,omitempty"`
 
-	// No omitempty: Go clients have to send an empty list as [], since leaving the field out means the default.
-
 	// NetworkPolicies are created in each preview namespace. An empty list creates none.
 	// +optional
 	// +listType=atomic
