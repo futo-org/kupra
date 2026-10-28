@@ -81,15 +81,17 @@ type PreviewReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;create;patch;delete
 // +kubebuilder:rbac:groups="",namespace=kupra-system,resources=serviceaccounts,verbs=get;create;patch;delete;impersonate
 
+// Reconcile does the writes: it adds the finalizer, patches whatever status reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done.
 func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var preview kuprav1alpha1.Preview
 	if err := r.Get(ctx, req.NamespacedName, &preview); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if !preview.DeletionTimestamp.IsZero() {
-		return r.delete(ctx, &preview)
-	}
-	if !controllerutil.ContainsFinalizer(&preview, Finalizer) {
+	deleting := !preview.DeletionTimestamp.IsZero()
+	switch {
+	case deleting && !controllerutil.ContainsFinalizer(&preview, Finalizer):
+		return ctrl.Result{}, nil
+	case !deleting && !controllerutil.ContainsFinalizer(&preview, Finalizer):
 		patch := client.MergeFromWithOptions(preview.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(&preview, Finalizer)
 		if err := r.Patch(ctx, &preview, patch); err != nil {
@@ -98,9 +100,21 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	before := preview.DeepCopy()
-	result, err := r.reconcile(ctx, &preview)
+	var result ctrl.Result
+	var cleanedUp bool
+	var err error
+	if deleting {
+		result, cleanedUp, err = r.reconcileDelete(ctx, &preview)
+	} else {
+		result, err = r.reconcile(ctx, &preview)
+	}
 	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFrom(before)); patchErr != nil {
 		return ctrl.Result{}, errors.Join(err, patchErr)
+	}
+	if cleanedUp {
+		patch := client.MergeFromWithOptions(preview.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		controllerutil.RemoveFinalizer(&preview, Finalizer)
+		return ctrl.Result{}, r.Patch(ctx, &preview, patch)
 	}
 	return result, err
 }
@@ -442,20 +456,13 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 	return true, "", nil
 }
 
-func (r *PreviewReconciler) delete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
-	if !controllerutil.ContainsFinalizer(p, Finalizer) {
-		return ctrl.Result{}, nil
-	}
+// reconcileDelete removes the preview's namespace and apply account. It reports whether cleanup is done, so the finalizer can go.
+func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, bool, error) {
 	nsName := previewNamespaceName(p.Namespace, p.Name)
-
-	before := p.DeepCopy()
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
 	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating, "")
 	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReconciling, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
 	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionStalled)
-	if err := r.Status().Patch(ctx, p, client.MergeFrom(before)); err != nil {
-		return ctrl.Result{}, err
-	}
 
 	var ns corev1.Namespace
 	gone := false
@@ -463,16 +470,16 @@ func (r *PreviewReconciler) delete(ctx context.Context, p *kuprav1alpha1.Preview
 	case apierrors.IsNotFound(err):
 		gone = true
 	case err != nil:
-		return ctrl.Result{}, err
+		return ctrl.Result{}, false, err
 	case ns.Annotations[AnnotationPreviewUID] != string(p.UID):
 		gone = true
 	case ns.DeletionTimestamp.IsZero():
 		if err := client.IgnoreNotFound(r.Delete(ctx, &ns)); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, false, err
 		}
 	}
 	if !gone {
-		return ctrl.Result{RequeueAfter: startingInterval}, nil
+		return ctrl.Result{RequeueAfter: startingInterval}, false, nil
 	}
 
 	// Another Preview's account can have the same name, when their namespace names collide.
@@ -480,16 +487,13 @@ func (r *PreviewReconciler) delete(ctx context.Context, p *kuprav1alpha1.Preview
 	switch err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: nsName}, &account); {
 	case apierrors.IsNotFound(err):
 	case err != nil:
-		return ctrl.Result{}, err
+		return ctrl.Result{}, false, err
 	case account.Annotations[AnnotationPreviewUID] == string(p.UID):
 		if err := client.IgnoreNotFound(r.Delete(ctx, &account, client.Preconditions{UID: &account.UID})); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, false, err
 		}
 	}
-
-	patch := client.MergeFromWithOptions(p.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	controllerutil.RemoveFinalizer(p, Finalizer)
-	return ctrl.Result{}, r.Patch(ctx, p, patch)
+	return ctrl.Result{}, true, nil
 }
 
 func pending(p *kuprav1alpha1.Preview, reason, message string) {
