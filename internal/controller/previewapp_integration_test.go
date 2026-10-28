@@ -252,6 +252,23 @@ func TestExamplesAreAccepted(t *testing.T) {
 	}
 }
 
+func TestOwnerWithEmptyNamespace(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "owners-empty", nil)
+	u := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kupra.futo.tech/v1alpha1",
+		"kind":       "Preview",
+		"metadata":   map[string]any{"name": "preview", "namespace": "owners-empty"},
+		"spec": map[string]any{
+			"appRef": map[string]any{"name": "app"},
+			"owners": []any{map[string]any{"kind": "ServiceAccount", "name": "flux", "namespace": ""}},
+		},
+	}}
+	if err := k8s.Create(ctx, u, client.DryRunAll); err == nil {
+		t.Error("a service account owner with an empty namespace was accepted, want it rejected")
+	}
+}
+
 func TestOwnerValidation(t *testing.T) {
 	ctx := context.Background()
 	createNamespace(t, "owners", nil)
@@ -263,6 +280,9 @@ func TestOwnerValidation(t *testing.T) {
 		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"}, ok: true},
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Namespace: "flux-system", Name: "flux"}, ok: true},
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "flux"}, ok: false},
+		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "reviewers"}, ok: true},
+		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, APIGroup: "example.com", Name: "alice"}, ok: false},
+		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, APIGroup: rbacv1.GroupName, Namespace: "flux-system", Name: "flux"}, ok: false},
 		{owner: rbacv1.Subject{Kind: "Robot", Name: "r2d2"}, ok: false},
 		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:unauthenticated"}, ok: false},
 		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "system:authenticated"}, ok: false},
