@@ -50,14 +50,15 @@ func Resolve(ctx context.Context, c client.Reader, namespace string) (string, ku
 	}
 	var fallback *kuprav1alpha1.PreviewPolicySpec
 	if p.Name != DefaultName {
+		// Without the default policy, fields a policy leaves out would quietly mean no network policies or quota.
 		var d kuprav1alpha1.PreviewPolicy
-		switch err := c.Get(ctx, client.ObjectKey{Name: DefaultName}, &d); {
-		case apierrors.IsNotFound(err):
-		case err != nil:
+		if err := c.Get(ctx, client.ObjectKey{Name: DefaultName}, &d); err != nil {
+			if apierrors.IsNotFound(err) {
+				return "", kuprav1alpha1.PreviewPolicySpec{}, &NotFoundError{Name: DefaultName}
+			}
 			return "", kuprav1alpha1.PreviewPolicySpec{}, err
-		default:
-			fallback = &d.Spec
 		}
+		fallback = &d.Spec
 	}
 	settings := Effective(p.Spec, fallback)
 	if settings.Apply == nil {

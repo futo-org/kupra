@@ -1,11 +1,18 @@
 package policy
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
@@ -69,5 +76,21 @@ func TestEffectiveWithoutFallback(t *testing.T) {
 	got := Effective(kuprav1alpha1.PreviewPolicySpec{}, nil)
 	if got.Apply != nil || got.NetworkPolicies != nil || got.ResourceQuota != nil || got.NamespaceMetadata != nil {
 		t.Errorf("got %+v, want nothing filled in", got)
+	}
+}
+
+func TestResolveNeedsTheDefaultPolicy(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kuprav1alpha1.AddToScheme(scheme))
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "apps", Labels: map[string]string{Label: "custom"}}},
+		&kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: "custom"}},
+	).Build()
+
+	_, _, err := Resolve(context.Background(), c, "apps")
+	var notFound *NotFoundError
+	if !errors.As(err, &notFound) || notFound.Name != DefaultName {
+		t.Errorf("Resolve gave %v, want the default policy not found", err)
 	}
 }
