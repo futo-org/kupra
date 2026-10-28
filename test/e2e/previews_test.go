@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -87,7 +88,7 @@ func TestPreviewLifecycle(t *testing.T) {
 
 	preview := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "pr-1", Namespace: ns.Name},
-		Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 	}
 	if err := k8s.Create(ctx, preview); err != nil {
 		t.Fatal(err)
@@ -102,7 +103,7 @@ func TestPreviewLifecycle(t *testing.T) {
 			if err := k8s.Get(ctx, client.ObjectKeyFromObject(preview), preview); err != nil {
 				return err
 			}
-			ready := meta.FindStatusCondition(preview.Status.Conditions, kuprav1alpha1.ConditionReady)
+			ready := apimeta.FindStatusCondition(preview.Status.Conditions, meta.ReadyCondition)
 			if preview.Status.ObservedGeneration != preview.Generation || preview.Status.Phase != kuprav1alpha1.PreviewRunning {
 				return fmt.Errorf("Preview is %s, Ready %+v", preview.Status.Phase, ready)
 			}

@@ -53,7 +53,7 @@ spec:
                       applied with.
                     properties:
                       name:
-                        minLength: 1
+                        description: Name of the referent.
                         type: string
                     required:
                     - name

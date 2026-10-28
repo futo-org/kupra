@@ -11,9 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -51,7 +52,7 @@ func waitForReady(t *testing.T, app *kuprav1alpha1.PreviewApp, status metav1.Con
 		if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(app), &got); err != nil {
 			return err
 		}
-		c := meta.FindStatusCondition(got.Status.Conditions, kuprav1alpha1.ConditionReady)
+		c := apimeta.FindStatusCondition(got.Status.Conditions, meta.ReadyCondition)
 		if c == nil || c.ObservedGeneration != got.Generation || c.Status != status || c.Reason != reason {
 			return fmt.Errorf("PreviewApp %s: Ready = %+v, want %s with reason %s", app.Name, c, status, reason)
 		}
@@ -169,7 +170,7 @@ func TestPreviewAppRefIsImmutable(t *testing.T) {
 	createNamespace(t, "immutable", nil)
 	preview := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "preview", Namespace: "immutable"},
-		Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 	}
 	if err := k8s.Create(ctx, preview); err != nil {
 		t.Fatal(err)
@@ -270,7 +271,7 @@ func TestOwnerValidation(t *testing.T) {
 		p := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{GenerateName: "preview-", Namespace: "owners"},
 			Spec: kuprav1alpha1.PreviewSpec{
-				AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"},
+				AppRef: meta.LocalObjectReference{Name: "app"},
 				Owners: []rbacv1.Subject{tc.owner},
 			},
 		}

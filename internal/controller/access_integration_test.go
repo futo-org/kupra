@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,7 +75,7 @@ template:
 	eventually(t, func() error {
 		p := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{GenerateName: "alice-", Namespace: "access", Annotations: map[string]string{"kupra.futo.tech/created-by": "mallory"}},
-			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 		}
 		if err := as(t, "alice").Create(ctx, p); err != nil {
 			return err

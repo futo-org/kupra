@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,7 +38,6 @@ import (
 )
 
 const (
-	ReasonProgressing          = "Progressing"
 	ReasonAppNotFound          = "AppNotFound"
 	ReasonAppNotReady          = "AppNotReady"
 	ReasonNamespaceConflict    = "NamespaceConflict"
@@ -66,7 +66,7 @@ type PreviewReconciler struct {
 	// APIReader reads objects kupra doesn't cache, such as a preview namespace's RoleBindings.
 	APIReader client.Reader
 	Config    *rest.Config
-	Mapper    meta.RESTMapper
+	Mapper    apimeta.RESTMapper
 	// Namespace is kupra's own namespace, where previews' service accounts live.
 	Namespace string
 }
@@ -161,7 +161,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 		return ctrl.Result{}, err
 	}
-	if c := meta.FindStatusCondition(app.Status.Conditions, kuprav1alpha1.ConditionReady); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
+	if c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
 		message := fmt.Sprintf("PreviewApp %s hasn't been checked yet", app.Name)
 		if c != nil && c.ObservedGeneration == app.Generation {
 			message = fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message)
@@ -230,7 +230,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		running(p)
 		return ctrl.Result{RequeueAfter: runningInterval}, nil
 	}
-	starting(p, ReasonProgressing, message)
+	starting(p, meta.ProgressingReason, message)
 	stallAfterTimeout(p, &app, message)
 	return ctrl.Result{RequeueAfter: startingInterval}, nil
 }
@@ -241,8 +241,8 @@ func stallAfterTimeout(p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, 
 	if app.Spec.Timeout != nil {
 		timeout = app.Spec.Timeout.Duration
 	}
-	if c := meta.FindStatusCondition(p.Status.Conditions, kuprav1alpha1.ConditionReconciling); c != nil && time.Since(c.LastTransitionTime.Time) > timeout {
-		setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionStalled, metav1.ConditionTrue, ReasonTimeout,
+	if c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReconcilingCondition); c != nil && time.Since(c.LastTransitionTime.Time) > timeout {
+		setCondition(&p.Status.Conditions, p.Generation, meta.StalledCondition, metav1.ConditionTrue, ReasonTimeout,
 			fmt.Sprintf("not ready after %s: %s", timeout, message))
 	}
 }
@@ -427,7 +427,7 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 			continue
 		}
 		mapping, err := r.Mapper.RESTMapping(schema.GroupKind{Group: refGroup(ref), Kind: ref.Kind})
-		if meta.IsNoMatchError(err) {
+		if apimeta.IsNoMatchError(err) {
 			continue
 		}
 		if err != nil {
@@ -481,9 +481,9 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, bool, error) {
 	nsName := previewNamespaceName(p.Namespace, p.Name)
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating, "")
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReconciling, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
-	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionStalled)
+	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonTerminating, "")
+	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
+	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
 
 	var ns corev1.Namespace
 	gone := false
@@ -519,9 +519,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 
 func pending(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewPending
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionStalled, metav1.ConditionTrue, reason, message)
-	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionReconciling)
+	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
+	setCondition(&p.Status.Conditions, p.Generation, meta.StalledCondition, metav1.ConditionTrue, reason, message)
+	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.ReconcilingCondition)
 }
 
 func failed(p *kuprav1alpha1.Preview, reason, message string) {
@@ -531,16 +531,16 @@ func failed(p *kuprav1alpha1.Preview, reason, message string) {
 
 func starting(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStarting
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReconciling, metav1.ConditionTrue, ReasonProgressing, message)
-	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionStalled)
+	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
+	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, meta.ProgressingReason, message)
+	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
 }
 
 func running(p *kuprav1alpha1.Preview) {
 	p.Status.Phase = kuprav1alpha1.PreviewRunning
-	setCondition(&p.Status.Conditions, p.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionTrue, ReasonSucceeded, "")
-	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionReconciling)
-	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionStalled)
+	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionTrue, meta.SucceededReason, "")
+	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.ReconcilingCondition)
+	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
 }
 
 func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {

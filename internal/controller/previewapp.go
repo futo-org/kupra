@@ -5,9 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -24,7 +25,6 @@ import (
 )
 
 const (
-	ReasonSucceeded           = "Succeeded"
 	ReasonInvalid             = "Invalid"
 	ReasonCheckFailed         = "CheckFailed"
 	ReasonPolicyNotFound      = "PolicyNotFound"
@@ -66,18 +66,18 @@ func (r *PreviewAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	patch := client.MergeFrom(app.DeepCopy())
 	app.Status.ObservedGeneration = app.Generation
-	if reason == ReasonSucceeded {
-		setCondition(&app.Status.Conditions, app.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionTrue, reason, "")
-		meta.RemoveStatusCondition(&app.Status.Conditions, kuprav1alpha1.ConditionStalled)
+	if reason == meta.SucceededReason {
+		setCondition(&app.Status.Conditions, app.Generation, meta.ReadyCondition, metav1.ConditionTrue, reason, "")
+		apimeta.RemoveStatusCondition(&app.Status.Conditions, meta.StalledCondition)
 	} else {
-		setCondition(&app.Status.Conditions, app.Generation, kuprav1alpha1.ConditionReady, metav1.ConditionFalse, reason, message)
-		setCondition(&app.Status.Conditions, app.Generation, kuprav1alpha1.ConditionStalled, metav1.ConditionTrue, reason, message)
+		setCondition(&app.Status.Conditions, app.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
+		setCondition(&app.Status.Conditions, app.Generation, meta.StalledCondition, metav1.ConditionTrue, reason, message)
 	}
 	if err := r.Status().Patch(ctx, &app, patch); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if reason != ReasonSucceeded && reason != ReasonInvalid {
+	if reason != meta.SucceededReason && reason != ReasonInvalid {
 		return ctrl.Result{RequeueAfter: recheckInterval}, nil
 	}
 	return ctrl.Result{}, nil
@@ -114,7 +114,7 @@ func (r *PreviewAppReconciler) check(ctx context.Context, app *kuprav1alpha1.Pre
 	if len(errs) > 0 {
 		return ReasonCheckFailed, errs.ToAggregate().Error(), nil
 	}
-	return ReasonSucceeded, "", nil
+	return meta.SucceededReason, "", nil
 }
 
 func (r *PreviewAppReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -148,7 +148,7 @@ func (r *PreviewAppReconciler) apps(ctx context.Context, opts ...client.ListOpti
 }
 
 func setCondition(conditions *[]metav1.Condition, generation int64, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	meta.SetStatusCondition(conditions, metav1.Condition{
+	apimeta.SetStatusCondition(conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
 		ObservedGeneration: generation,

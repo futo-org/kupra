@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,7 +49,7 @@ func TestCustomTemplateRole(t *testing.T) {
 	create(t, &kuprav1alpha1.PreviewPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "e2e-" + suffix},
 		Spec: kuprav1alpha1.PreviewPolicySpec{
-			Apply: &kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: role.Name}},
+			Apply: &kuprav1alpha1.ApplySettings{ClusterRoleRef: meta.LocalObjectReference{Name: role.Name}},
 		},
 	})
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
@@ -76,7 +77,7 @@ template:
 			if err := k8s.Get(ctx, client.ObjectKeyFromObject(app), app); err != nil {
 				return err
 			}
-			c := meta.FindStatusCondition(app.Status.Conditions, kuprav1alpha1.ConditionReady)
+			c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition)
 			if c == nil || c.ObservedGeneration != app.Generation || c.Status != status || c.Reason != reason {
 				return fmt.Errorf("PreviewApp Ready = %+v, want %s with reason %s", c, status, reason)
 			}
@@ -101,7 +102,7 @@ template:
 
 	preview := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "preview", Namespace: ns.Name},
-		Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 	}
 	create(t, preview)
 	eventually(t, 2*time.Minute, func() error {

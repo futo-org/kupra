@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -38,7 +39,7 @@ func waitForPhase(t *testing.T, namespace, name string, phase kuprav1alpha1.Prev
 		if err := k8s.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
 			return err
 		}
-		c := meta.FindStatusCondition(p.Status.Conditions, kuprav1alpha1.ConditionReady)
+		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
 		if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != phase || c == nil || c.Reason != reason {
 			return fmt.Errorf("Preview %s: phase %s, Ready %+v; want %s with reason %s", name, p.Status.Phase, c, phase, reason)
 		}
@@ -104,7 +105,7 @@ template:
 
 	preview := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "pr-1", Namespace: "previews", Labels: map[string]string{"example.com/pull-request": "1"}},
-		Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 	}
 	if err := k8s.Create(ctx, preview); err != nil {
 		t.Fatal(err)
@@ -219,7 +220,7 @@ template:
 	t.Run("long name", func(t *testing.T) {
 		long := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("a", 64), Namespace: "previews"},
-			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 		}
 		if err := k8s.Create(ctx, long); err == nil {
 			t.Error("creating a Preview with a 64 character name succeeded, want it rejected")
@@ -237,7 +238,7 @@ template:
 `)
 		orphan := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: "orphan", Namespace: "previews"},
-			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "short-lived"}},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "short-lived"}},
 		}
 		if err := k8s.Create(ctx, orphan); err != nil {
 			t.Fatal(err)
@@ -280,7 +281,7 @@ template:
 				t.Fatal(err)
 			}
 		}
-		setRole(&kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: "missing"}})
+		setRole(&kuprav1alpha1.ApplySettings{ClusterRoleRef: meta.LocalObjectReference{Name: "missing"}})
 		waitForPhase(t, "previews", "pr-1", kuprav1alpha1.PreviewPending, "ClusterRoleNotFound")
 		var binding rbacv1.RoleBinding
 		if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "kupra-template"}, &binding); err != nil || binding.RoleRef.Name != "kupra-preview-template-base" {
@@ -295,7 +296,7 @@ template:
 		createNamespace(t, conflict, nil)
 		taken := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: "taken", Namespace: "previews", Labels: map[string]string{"example.com/pull-request": "2"}},
-			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
 		}
 		if err := k8s.Create(ctx, taken); err != nil {
 			t.Fatal(err)
@@ -329,7 +330,7 @@ template:
 		invalid := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: "invalid", Namespace: "previews"},
 			Spec: kuprav1alpha1.PreviewSpec{
-				AppRef:     kuprav1alpha1.LocalObjectReference{Name: "app"},
+				AppRef:     meta.LocalObjectReference{Name: "app"},
 				Parameters: map[string]string{"service": "maybe"},
 			},
 		}
@@ -357,13 +358,13 @@ template:
 `)
 		rejected := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: "rejected", Namespace: "previews"},
-			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "rejected"}},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "rejected"}},
 		}
 		if err := k8s.Create(ctx, rejected); err != nil {
 			t.Fatal(err)
 		}
 		p := waitForPhase(t, "previews", "rejected", kuprav1alpha1.PreviewFailed, "ApplyFailed")
-		if c := meta.FindStatusCondition(p.Status.Conditions, kuprav1alpha1.ConditionStalled); c == nil || c.Status != metav1.ConditionTrue {
+		if c := apimeta.FindStatusCondition(p.Status.Conditions, meta.StalledCondition); c == nil || c.Status != metav1.ConditionTrue {
 			t.Errorf("Stalled = %+v, want True straight away", c)
 		}
 	})
@@ -379,7 +380,7 @@ template:
 `)
 		broken := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: "broken", Namespace: "previews"},
-			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "broken"}},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "broken"}},
 		}
 		if err := k8s.Create(ctx, broken); err != nil {
 			t.Fatal(err)

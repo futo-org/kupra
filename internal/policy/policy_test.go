@@ -3,6 +3,7 @@ package policy
 import (
 	"testing"
 
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -10,7 +11,7 @@ import (
 )
 
 var defaults = kuprav1alpha1.PreviewPolicySpec{
-	Apply:           &kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: "kupra-preview-template"}},
+	Apply:           &kuprav1alpha1.ApplySettings{ClusterRoleRef: meta.LocalObjectReference{Name: "kupra-preview-template"}},
 	NetworkPolicies: []kuprav1alpha1.NetworkPolicyTemplate{{Metadata: kuprav1alpha1.TemplateMetadata{Name: "restrict-egress"}}},
 	ResourceQuota:   &corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{corev1.ResourceRequestsCPU: resource.MustParse("4")}},
 	LimitRange:      &corev1.LimitRangeSpec{Limits: []corev1.LimitRangeItem{{Type: corev1.LimitTypeContainer}}},

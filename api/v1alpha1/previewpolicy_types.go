@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,7 +32,7 @@ type PreviewPolicySpec struct {
 
 type ApplySettings struct {
 	// ClusterRoleRef names the ClusterRole templates are applied with.
-	ClusterRoleRef LocalObjectReference `json:"clusterRoleRef"`
+	ClusterRoleRef meta.LocalObjectReference `json:"clusterRoleRef"`
 }
 
 type NetworkPolicyTemplate struct {

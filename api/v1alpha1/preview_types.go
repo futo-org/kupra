@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -9,7 +10,7 @@ import (
 type PreviewSpec struct {
 	// AppRef names the PreviewApp in the Preview's namespace.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="appRef is immutable"
-	AppRef LocalObjectReference `json:"appRef"`
+	AppRef meta.LocalObjectReference `json:"appRef"`
 
 	// Parameters are values for the PreviewApp's parameters. Like environment variables, they're strings, whatever the parameter's type.
 	// +optional
@@ -23,11 +24,6 @@ type PreviewSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind != 'ServiceAccount' || has(s.__namespace__))",message="service account owners need a namespace"
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners can't be system users or groups, such as system:authenticated"
 	Owners []rbacv1.Subject `json:"owners,omitempty"`
-}
-
-type LocalObjectReference struct {
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
 }
 
 // +kubebuilder:validation:Enum=Pending;Provisioning;Starting;Running;Stopping;Stopped;Terminating;Failed

@@ -58,7 +58,7 @@ spec:
                 description: AppRef names the PreviewApp in the Preview's namespace.
                 properties:
                   name:
-                    minLength: 1
+                    description: Name of the referent.
                     type: string
                 required:
                 - name
