@@ -34,7 +34,7 @@ func (c *Checker) Template(app *render.App, roleName string, rules []rbacv1.Poli
 		mapping, err := c.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			if meta.IsNoMatchError(err) {
-				errs = append(errs, field.Invalid(r.Path.Child("kind"), gvk.Kind, fmt.Sprintf("the cluster doesn't serve %s in %s", gvk.Kind, gvk.GroupVersion())))
+				errs = append(errs, field.Invalid(r.Path.Child("kind"), gvk.Kind, err.Error()))
 				continue
 			}
 			errs = append(errs, field.InternalError(r.Path, err))

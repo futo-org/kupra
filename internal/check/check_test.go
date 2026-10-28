@@ -167,7 +167,7 @@ template:
 		`spec.template.resources[0].spec.template.spec.containers[0].imagExpr: Invalid value: "imag": there's no field imag`,
 		`spec.template.resources[1].kind: Forbidden: the policy's ClusterRole kupra-preview-template doesn't allow get, create, patch, delete on configmaps`,
 		`spec.template.resources[2].kind: Forbidden: ClusterRole is cluster-scoped, and templates can only contain namespaced resources`,
-		`spec.template.resources[3].kind: Invalid value: "Widget": the cluster doesn't serve Widget in example.com/v1`,
+		`spec.template.resources[3].kind: Invalid value: "Widget": no matches for kind "Widget" in version "example.com/v1"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("errors = %q\nwant them to contain %q", got, want)
