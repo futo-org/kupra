@@ -26,6 +26,8 @@ type PreviewAppSpec struct {
 
 	// Timeout is how long a preview may take to become ready before it's marked as stalled. Defaults to 30m.
 	// +optional
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern="^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
 	Template Template `json:"template"`

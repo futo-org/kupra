@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -276,6 +277,41 @@ func TestOwnerValidation(t *testing.T) {
 		}
 		if !tc.ok && err == nil {
 			t.Errorf("owner %+v was accepted, want it rejected", tc.owner)
+		}
+	}
+}
+
+func TestTimeoutValidation(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "timeouts", nil)
+	for _, tc := range []struct {
+		timeout string
+		ok      bool
+	}{
+		{timeout: "30m", ok: true},
+		{timeout: "1h30m", ok: true},
+		{timeout: "banana", ok: false},
+		{timeout: "-5s", ok: false},
+	} {
+		app := &kuprav1alpha1.PreviewApp{ObjectMeta: metav1.ObjectMeta{GenerateName: "app-", Namespace: "timeouts"}}
+		if err := yaml.UnmarshalStrict([]byte("template:\n  resources: []\n"), &app.Spec); err != nil {
+			t.Fatal(err)
+		}
+		u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(app)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obj := &unstructured.Unstructured{Object: u}
+		obj.SetGroupVersionKind(kuprav1alpha1.GroupVersion.WithKind("PreviewApp"))
+		if err := unstructured.SetNestedField(obj.Object, tc.timeout, "spec", "timeout"); err != nil {
+			t.Fatal(err)
+		}
+		err = k8s.Create(ctx, obj, client.DryRunAll)
+		if tc.ok && err != nil {
+			t.Errorf("timeout %s: %v", tc.timeout, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("timeout %s was accepted, want it rejected", tc.timeout)
 		}
 	}
 }

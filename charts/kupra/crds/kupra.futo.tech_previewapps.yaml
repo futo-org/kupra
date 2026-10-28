@@ -150,6 +150,7 @@ spec:
               timeout:
                 description: Timeout is how long a preview may take to become ready
                   before it's marked as stalled. Defaults to 30m.
+                pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
                 type: string
               variables:
                 description: Variables are values computed once per preview, each
