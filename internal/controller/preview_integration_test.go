@@ -49,7 +49,7 @@ func waitForPhase(t *testing.T, namespace, name string, phase kuprav1alpha1.Prev
 
 func TestPreviews(t *testing.T) {
 	ctx := context.Background()
-	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{
+	setUpPolicies(t, &kuprav1alpha1.PreviewPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "previews"},
 		Spec: kuprav1alpha1.PreviewPolicySpec{
 			NetworkPolicies:   []kuprav1alpha1.NetworkPolicyTemplate{},

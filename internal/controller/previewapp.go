@@ -32,6 +32,7 @@ const (
 	ReasonCheckFailed         = "CheckFailed"
 	ReasonPolicyNotFound      = "PolicyNotFound"
 	ReasonClusterRoleNotFound = "ClusterRoleNotFound"
+	ReasonNoTemplateRole      = "NoTemplateRole"
 	ReasonCannotBindRole      = "CannotBindRole"
 
 	// LabelAggregateToOperator approves a ClusterRole's rules for kupra. Admins use it to let kupra bind a custom template role.
@@ -91,15 +92,18 @@ func (r *PreviewAppReconciler) check(ctx context.Context, app *kuprav1alpha1.Pre
 		return ReasonInvalid, errs.ToAggregate().Error(), nil
 	}
 
-	p, err := policy.ForNamespace(ctx, r.Client, app.Namespace)
+	_, settings, err := policy.Resolve(ctx, r.Client, app.Namespace)
 	if notFound := (*policy.NotFoundError)(nil); errors.As(err, &notFound) {
 		return ReasonPolicyNotFound, err.Error(), nil
+	}
+	if noRole := (*policy.NoTemplateRoleError)(nil); errors.As(err, &noRole) {
+		return ReasonNoTemplateRole, err.Error(), nil
 	}
 	if err != nil {
 		return "", "", err
 	}
 
-	roleName := policy.Effective(p.Spec).Apply.ClusterRoleRef.Name
+	roleName := settings.Apply.ClusterRoleRef.Name
 	var role rbacv1.ClusterRole
 	if err := r.Get(ctx, client.ObjectKey{Name: roleName}, &role); err != nil {
 		if apierrors.IsNotFound(err) {

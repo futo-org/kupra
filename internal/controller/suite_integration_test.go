@@ -100,6 +100,11 @@ func apply(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	applyYAML(t, data)
+}
+
+func applyYAML(t *testing.T, data []byte) {
+	t.Helper()
 	for _, doc := range bytes.Split(data, []byte("\n---\n")) {
 		var u unstructured.Unstructured
 		if err := yaml.Unmarshal(doc, &u.Object); err != nil {
@@ -130,14 +135,19 @@ func eventually(t *testing.T, check func() error) {
 	}
 }
 
-// setUpPolicy applies kupra's template roles and creates a PreviewPolicy, unless it exists already. envtest has no controller-manager to aggregate ClusterRoles, so policies point at the rules directly.
-func setUpPolicy(t *testing.T, p *kuprav1alpha1.PreviewPolicy) {
+// setUpPolicies applies kupra's template roles and the chart's default PreviewPolicy, and creates any other PreviewPolicies given, unless they exist already. envtest has no controller-manager to aggregate ClusterRoles, so the default policy points at the rules directly.
+func setUpPolicies(t *testing.T, policies ...*kuprav1alpha1.PreviewPolicy) {
 	t.Helper()
-	apply(t, filepath.Join("..", "..", "charts", "kupra", "templates", "template-clusterroles.yaml"))
-	if p.Spec.Apply == nil {
-		p.Spec.Apply = &kuprav1alpha1.ApplySettings{ClusterRoleRef: kuprav1alpha1.LocalObjectReference{Name: "kupra-preview-template-base"}}
-	}
-	if err := k8s.Create(context.Background(), p); err != nil && !apierrors.IsAlreadyExists(err) {
+	templates := filepath.Join("..", "..", "charts", "kupra", "templates")
+	apply(t, filepath.Join(templates, "template-clusterroles.yaml"))
+	data, err := os.ReadFile(filepath.Join(templates, "default-policy.yaml"))
+	if err != nil {
 		t.Fatal(err)
+	}
+	applyYAML(t, bytes.ReplaceAll(data, []byte("name: kupra-preview-template\n"), []byte("name: kupra-preview-template-base\n")))
+	for _, p := range policies {
+		if err := k8s.Create(context.Background(), p); err != nil && !apierrors.IsAlreadyExists(err) {
+			t.Fatal(err)
+		}
 	}
 }

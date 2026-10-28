@@ -129,15 +129,18 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, err
 	}
 
-	pol, err := policy.ForNamespace(ctx, r.Client, p.Namespace)
+	_, settings, err := policy.Resolve(ctx, r.Client, p.Namespace)
 	if notFound := (*policy.NotFoundError)(nil); errors.As(err, &notFound) {
 		pending(p, ReasonPolicyNotFound, err.Error())
+		return ctrl.Result{}, nil
+	}
+	if noRole := (*policy.NoTemplateRoleError)(nil); errors.As(err, &noRole) {
+		pending(p, ReasonNoTemplateRole, err.Error())
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	settings := policy.Effective(pol.Spec)
 	accountName := nsName
 
 	// An existing preview namespace follows its policy even while the app is missing or failing its checks.
@@ -262,14 +265,15 @@ func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha
 		return ReasonNamespaceTerminating, fmt.Sprintf("namespace %s is still being deleted", name), nil
 	}
 
-	labels := maps.Clone(settings.NamespaceMetadata.Labels)
+	labels := map[string]string{}
+	annotations := map[string]string{}
+	if md := settings.NamespaceMetadata; md != nil {
+		maps.Copy(labels, md.Labels)
+		maps.Copy(annotations, md.Annotations)
+	}
 	labels[LabelApp] = p.Spec.AppRef.Name
 	labels[LabelPreview] = p.Name
 	labels[LabelPreviewNamespace] = p.Namespace
-	annotations := maps.Clone(settings.NamespaceMetadata.Annotations)
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
 	annotations[AnnotationPreviewUID] = string(p.UID)
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, Annotations: annotations}}
@@ -308,11 +312,17 @@ func (r *PreviewReconciler) applyPolicy(ctx context.Context, namespace string, s
 		}
 	}
 
-	quota := &corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: policyObjectName, Namespace: namespace, Labels: marker}, Spec: *settings.ResourceQuota}
+	quota := &corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: policyObjectName, Namespace: namespace, Labels: marker}}
+	if settings.ResourceQuota != nil {
+		quota.Spec = *settings.ResourceQuota
+	}
 	if err := r.applyOrDelete(ctx, quota, len(quota.Spec.Hard) > 0); err != nil {
 		return err
 	}
-	limits := &corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: policyObjectName, Namespace: namespace, Labels: marker}, Spec: *settings.LimitRange}
+	limits := &corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: policyObjectName, Namespace: namespace, Labels: marker}}
+	if settings.LimitRange != nil {
+		limits.Spec = *settings.LimitRange
+	}
 	return r.applyOrDelete(ctx, limits, len(limits.Spec.Limits) > 0)
 }
 

@@ -64,7 +64,7 @@ func waitForReady(t *testing.T, app *kuprav1alpha1.PreviewApp, status metav1.Con
 }
 
 func TestPreviewAppChecks(t *testing.T) {
-	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: policy.DefaultName}})
+	setUpPolicies(t)
 	createNamespace(t, "checks", nil)
 
 	valid := createApp(t, "checks", "valid", `
@@ -159,7 +159,7 @@ template:
 `)
 	waitForReady(t, custom, metav1.ConditionFalse, "PolicyNotFound", "PreviewPolicy custom doesn't exist")
 
-	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: "custom"}})
+	setUpPolicies(t, &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: "custom"}})
 	waitForReady(t, custom, metav1.ConditionTrue, "Succeeded")
 }
 

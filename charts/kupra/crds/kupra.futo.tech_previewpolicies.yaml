@@ -44,7 +44,7 @@ spec:
             type: object
           spec:
             description: PreviewPolicySpec holds the settings for preview namespaces.
-              Fields left out get kupra's built-in defaults.
+              Fields left out are taken from the default PreviewPolicy.
             properties:
               apply:
                 properties:
@@ -138,7 +138,7 @@ spec:
                 type: object
               namespaceMetadata:
                 description: NamespaceMetadata adds labels and annotations to each
-                  preview namespace, merged over kupra's default labels.
+                  preview namespace, merged over the default PreviewPolicy's.
                 properties:
                   annotations:
                     additionalProperties:

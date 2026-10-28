@@ -6,7 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PreviewPolicySpec holds the settings for preview namespaces. Fields left out get kupra's built-in defaults.
+// PreviewPolicySpec holds the settings for preview namespaces. Fields left out are taken from the default PreviewPolicy.
 type PreviewPolicySpec struct {
 	// +optional
 	Apply *ApplySettings `json:"apply,omitempty"`
@@ -24,7 +24,7 @@ type PreviewPolicySpec struct {
 	// +optional
 	LimitRange *corev1.LimitRangeSpec `json:"limitRange,omitempty"`
 
-	// NamespaceMetadata adds labels and annotations to each preview namespace, merged over kupra's default labels.
+	// NamespaceMetadata adds labels and annotations to each preview namespace, merged over the default PreviewPolicy's.
 	// +optional
 	NamespaceMetadata *NamespaceMetadata `json:"namespaceMetadata,omitempty"`
 }

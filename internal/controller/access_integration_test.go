@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
-	"github.com/futo-org/kupra/internal/policy"
 )
 
 func bind(t *testing.T, namespace, clusterRole, user string) {
@@ -55,7 +54,7 @@ func TestAccess(t *testing.T) {
 	templates := filepath.Join("..", "..", "charts", "kupra", "templates")
 	apply(t, filepath.Join(templates, "access-clusterroles.yaml"))
 	apply(t, filepath.Join(templates, "created-by.yaml"))
-	setUpPolicy(t, &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: policy.DefaultName}})
+	setUpPolicies(t)
 
 	createNamespace(t, "access", nil)
 	createApp(t, "access", "app", `

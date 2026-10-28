@@ -74,7 +74,7 @@ spec:
 - **`networkPolicies`**, **`resourceQuota`** and **`limitRange`** are created in each preview namespace as written. A quota counts what pods request, and is checked when pods are created. It doesn't reserve capacity or cap actual usage, which is what the limit range's default limits are for.
 - **`namespaceMetadata`** adds labels and annotations to preview namespaces. That covers Pod Security admission, which is configured by namespace labels, and labels that shared infrastructure or other tools select namespaces by.
 
-Fields a policy leaves out get kupra's built-in defaults, not nothing. kupra's built-in namespace labels, including Pod Security's `enforce: baseline`, are merged under the policy's own, so adding an unrelated label doesn't drop them. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.
+kupra's chart installs the `default` policy with every setting spelled out, like the example above, and admins change the defaults through the chart's values. Other policies fall back to `default` for any field they leave out, one level deep. Labels and annotations are merged, with the policy's own over `default`'s, so adding an unrelated label doesn't drop Pod Security's `enforce: baseline`. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.
 
 Limits that belong to admins, such as how many previews may run at once, are anticipated as further fields.
 
@@ -100,7 +100,8 @@ kupra applies policy changes to existing previews straight away: it updates the 
 - **Namespaced policies in the app's namespace.** Whoever controls that namespace could loosen their own confinement.
 - **Policies that select namespaces.** Overlapping selectors need precedence rules, which makes it hard to see which policy applies.
 - **PreviewApps naming their own policy, gated by permission to use it.** This is roughly how PodSecurityPolicy worked, and that was removed from Kubernetes partly because it was hard to tell which policy applied to what.
-- **Policies that inherit from or merge with each other.** More flexible, but harder to read. Built-in defaults for omitted fields cover the common case.
+- **Defaults built into kupra's code.** Admins couldn't see them as a resource, or change them.
+- **Policies that inherit from each other in chains.** More flexible, but harder to read. Falling back to `default`, one level deep, covers the common case.
 - **Applying templates with Kubernetes' built-in `edit` role.** It already covers most workloads, and many operators extend it. But it includes NetworkPolicies, which templates mustn't create, and what it contains is decided by every operator installed in the cluster, not by kupra's admins.
 - **Leaving it to a policy engine.** Kyverno, for example, can generate network policies and quotas for namespaces with a given label, and kupra's labels make that possible on top. But secure defaults shouldn't depend on installing one, and the role templates are applied with is kupra's own concern.
 
