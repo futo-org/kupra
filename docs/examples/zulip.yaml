@@ -10,7 +10,8 @@ spec:
       default: "12.2-0"
       uiHint:
         type: imageTag
-        repository: ghcr.io/zulip/zulip-server
+        imageTag:
+          repository: ghcr.io/zulip/zulip-server
 
   variables:
     - name: host

@@ -20,7 +20,8 @@ parameters:
     required: true
     uiHint:
       type: imageTag
-      repository: ghcr.io/immich-app/immich-server
+      imageTag:
+        repository: ghcr.io/immich-app/immich-server
   - name: logLevel
     title: Log level
     enum: [verbose, debug, log]

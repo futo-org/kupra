@@ -102,10 +102,16 @@ spec:
                       description: UIHint asks the dashboard for a special input,
                         such as a picker for an image's tags.
                       properties:
-                        repository:
-                          description: Repository is the image repository whose tags
-                            are offered, for the imageTag type.
-                          type: string
+                        imageTag:
+                          description: ImageTag configures the imageTag hint.
+                          properties:
+                            repository:
+                              description: Repository is the image repository whose
+                                tags are offered.
+                              type: string
+                          required:
+                          - repository
+                          type: object
                         type:
                           enum:
                           - imageTag
@@ -113,6 +119,9 @@ spec:
                       required:
                       - type
                       type: object
+                      x-kubernetes-validations:
+                      - message: imageTag must be set if and only if type is imageTag
+                        rule: 'self.type == ''imageTag'' ? has(self.imageTag) : !has(self.imageTag)'
                   required:
                   - name
                   - title

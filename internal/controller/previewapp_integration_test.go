@@ -3,8 +3,11 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -183,5 +186,65 @@ func TestPreviewAppRefIsImmutable(t *testing.T) {
 	unstructured.RemoveNestedField(u.Object, "spec")
 	if err := k8s.Update(ctx, u); err == nil {
 		t.Error("removing a Preview's spec succeeded, want it rejected")
+	}
+}
+
+func TestUIHintNeedsItsSettings(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "ui-hints", nil)
+	for _, tc := range []struct {
+		hint string
+		ok   bool
+	}{
+		{hint: `{type: imageTag, imageTag: {repository: example.com/app}}`, ok: true},
+		{hint: `{type: imageTag}`, ok: false},
+	} {
+		app := &kuprav1alpha1.PreviewApp{ObjectMeta: metav1.ObjectMeta{GenerateName: "app-", Namespace: "ui-hints"}}
+		if err := yaml.UnmarshalStrict([]byte(`
+parameters:
+  - name: tag
+    title: Tag
+    uiHint: `+tc.hint+`
+template:
+  resources: []
+`), &app.Spec); err != nil {
+			t.Fatal(err)
+		}
+		err := k8s.Create(ctx, app, client.DryRunAll)
+		if tc.ok && err != nil {
+			t.Errorf("uiHint %s: %v", tc.hint, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("uiHint %s was accepted, want it rejected", tc.hint)
+		}
+	}
+}
+
+// TestExamplesAreAccepted checks the example PreviewApps against the CRDs. Fields for later features, such as template.secrets, are pruned rather than rejected.
+func TestExamplesAreAccepted(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "examples", nil)
+	files, err := filepath.Glob(filepath.Join("..", "..", "docs", "examples", "*.yaml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("finding examples: %v", err)
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, doc := range bytes.Split(data, []byte("\n---\n")) {
+			var u unstructured.Unstructured
+			if err := yaml.Unmarshal(doc, &u.Object); err != nil {
+				t.Fatal(err)
+			}
+			if u.GetKind() != "PreviewApp" {
+				continue
+			}
+			u.SetNamespace("examples")
+			if err := k8s.Create(ctx, &u, client.DryRunAll); err != nil {
+				t.Errorf("%s: %v", filepath.Base(file), err)
+			}
+		}
 	}
 }

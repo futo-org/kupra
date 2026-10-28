@@ -10,7 +10,8 @@ spec:
       required: true
       uiHint:
         type: imageTag
-        repository: ghcr.io/immich-app/immich-server
+        imageTag:
+          repository: ghcr.io/immich-app/immich-server
     - name: machineLearning
       title: Machine learning
       type: boolean

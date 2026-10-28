@@ -76,12 +76,18 @@ type UIHintType string
 
 const UIHintImageTag UIHintType = "imageTag"
 
+// +kubebuilder:validation:XValidation:rule="self.type == 'imageTag' ? has(self.imageTag) : !has(self.imageTag)",message="imageTag must be set if and only if type is imageTag"
 type UIHint struct {
 	Type UIHintType `json:"type"`
 
-	// Repository is the image repository whose tags are offered, for the imageTag type.
+	// ImageTag configures the imageTag hint.
 	// +optional
-	Repository string `json:"repository,omitempty"`
+	ImageTag *ImageTagHint `json:"imageTag,omitempty"`
+}
+
+type ImageTagHint struct {
+	// Repository is the image repository whose tags are offered.
+	Repository string `json:"repository"`
 }
 
 type Variable struct {

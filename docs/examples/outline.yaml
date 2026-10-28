@@ -10,7 +10,8 @@ spec:
       default: "1.10.1"
       uiHint:
         type: imageTag
-        repository: docker.io/outlinewiki/outline
+        imageTag:
+          repository: docker.io/outlinewiki/outline
 
   variables:
     - name: host
