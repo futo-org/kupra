@@ -25,12 +25,9 @@ func newEnv(parameters []kuprav1alpha1.Parameter) (*env, error) {
 	if err != nil {
 		return nil, err
 	}
-	stringMap := cel.MapType(cel.StringType, cel.StringType)
-	opts := []cel.EnvOption{
-		cel.Variable("preview.name", cel.StringType),
-		cel.Variable("preview.namespace", cel.StringType),
-		cel.Variable("preview.labels", stringMap),
-		cel.Variable("preview.annotations", stringMap),
+	var opts []cel.EnvOption
+	for _, f := range previewFields {
+		opts = append(opts, cel.Variable("preview."+f.name, f.typ))
 	}
 	for _, p := range parameters {
 		opts = append(opts, cel.Variable("parameters."+string(p.Name), parameterType(p.Type)))
@@ -40,6 +37,25 @@ func newEnv(parameters []kuprav1alpha1.Parameter) (*env, error) {
 		return nil, err
 	}
 	return &env{cel: celEnv}, nil
+}
+
+// previewFields are what expressions see of a preview, as preview.<name>.
+var previewFields = []struct {
+	name  string
+	typ   *cel.Type
+	value func(Preview) any
+}{
+	{"name", cel.StringType, func(p Preview) any { return p.Name }},
+	{"namespace", cel.StringType, func(p Preview) any { return p.Namespace }},
+	{"labels", cel.MapType(cel.StringType, cel.StringType), func(p Preview) any { return nonNil(p.Labels) }},
+	{"annotations", cel.MapType(cel.StringType, cel.StringType), func(p Preview) any { return nonNil(p.Annotations) }},
+}
+
+func nonNil(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 func parameterType(t kuprav1alpha1.ParameterType) *cel.Type {

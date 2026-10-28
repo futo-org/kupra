@@ -226,11 +226,9 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 		return nil, errs.ToAggregate()
 	}
 
-	activation := map[string]any{
-		"preview.name":        preview.Name,
-		"preview.namespace":   preview.Namespace,
-		"preview.labels":      nonNil(preview.Labels),
-		"preview.annotations": nonNil(preview.Annotations),
+	activation := map[string]any{}
+	for _, f := range previewFields {
+		activation["preview."+f.name] = f.value(preview)
 	}
 	for name, v := range params {
 		activation["parameters."+name] = v
@@ -331,11 +329,4 @@ func evalFields(value any, fldPath *field.Path, target []any, exprs map[string]*
 func pathKey(path []any) string {
 	b, _ := json.Marshal(path)
 	return string(b)
-}
-
-func nonNil(m map[string]string) map[string]string {
-	if m == nil {
-		return map[string]string{}
-	}
-	return m
 }
