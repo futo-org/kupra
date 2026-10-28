@@ -489,6 +489,44 @@ template:
 		}
 	})
 
+	t.Run("result types", func(t *testing.T) {
+		result, err := render(t, `
+template:
+  resources:
+    - apiVersion: example.com/v1
+      kind: Widget
+      metadata:
+        name: widget
+      spec:
+        sizeExpr: '9007199254740993'
+        timeoutExpr: duration("90m")
+        startExpr: timestamp("2026-01-01T00:00:00Z")
+        emptyExpr: '[]'
+`, `{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"size": int64(9007199254740993), "timeout": "1h30m0s", "start": "2026-01-01T00:00:00Z", "empty": []any{}}
+		if got := result.Objects[0].Object["spec"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("spec = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("bytes", func(t *testing.T) {
+		_, err := render(t, `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+      binaryDataExpr: '{"key": b"value"}'
+`, `{}`)
+		if err == nil || !strings.Contains(err.Error(), "convert it, for example with string()") {
+			t.Errorf("error = %v, want it to say bytes need converting", err)
+		}
+	})
+
 	t.Run("dotted keys", func(t *testing.T) {
 		result, err := render(t, `
 template:

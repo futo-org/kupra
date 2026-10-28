@@ -2,13 +2,14 @@ package render
 
 import (
 	"fmt"
-	"reflect"
+	"math"
+	"time"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/structpb"
-	"k8s.io/apimachinery/pkg/util/json"
+	"github.com/google/cel-go/common/types/traits"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/cel/environment"
 
@@ -99,19 +100,49 @@ func (e *env) compile(expression string, want *cel.Type) (*program, error) {
 	return &program{Program: prg, outputType: ast.OutputType()}, nil
 }
 
-// native converts an expression's result into a value for an unstructured object. It goes through CEL's JSON mapping, as MutatingAdmissionPolicy does for JSON patch values, and decodes whole numbers as integers the way Kubernetes does. Like JSON patch values, integers beyond ±2^53 come out as strings.
+// native converts an expression's result into a value for an unstructured object, the way kro's conversion.GoNativeType does. Integers stay exact, and durations and timestamps become Kubernetes' usual strings.
 func native(v ref.Val) (any, error) {
-	pb, err := v.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
-	if err != nil {
-		return nil, err
+	switch v.Type() {
+	case types.NullType:
+		return nil, nil
+	case types.BoolType, types.IntType, types.DoubleType, types.StringType:
+		return v.Value(), nil
+	case types.UintType:
+		u := v.Value().(uint64)
+		if u > math.MaxInt64 {
+			return nil, fmt.Errorf("%d is too large for a resource; convert it with string()", u)
+		}
+		return int64(u), nil
+	case types.DurationType:
+		return metav1.Duration{Duration: v.Value().(time.Duration)}.ToUnstructured(), nil
+	case types.TimestampType:
+		return metav1.Time{Time: v.Value().(time.Time)}.ToUnstructured(), nil
+	case types.ListType:
+		out := []any{}
+		for it := v.(traits.Lister).Iterator(); it.HasNext() == types.True; {
+			item, err := native(it.Next())
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, item)
+		}
+		return out, nil
+	case types.MapType:
+		m := v.(traits.Mapper)
+		out := map[string]any{}
+		for it := m.Iterator(); it.HasNext() == types.True; {
+			key := it.Next()
+			k, ok := key.(types.String)
+			if !ok {
+				return nil, fmt.Errorf("map keys must be strings, not %s", key.Type().TypeName())
+			}
+			item, err := native(m.Get(key))
+			if err != nil {
+				return nil, err
+			}
+			out[string(k)] = item
+		}
+		return out, nil
 	}
-	data, err := protojson.Marshal(pb.(*structpb.Value))
-	if err != nil {
-		return nil, err
-	}
-	var out any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return nil, fmt.Errorf("a %s can't go into a resource; convert it, for example with string()", v.Type().TypeName())
 }
