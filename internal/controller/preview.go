@@ -211,6 +211,11 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	if err != nil {
 		p.Status.Inventory = unionRefs(p.Status.Inventory, applied)
+		// An object the API server rejects as invalid stays invalid until the template or parameters change, and those changes requeue the preview.
+		if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
+			failed(p, ReasonApplyFailed, err.Error())
+			return ctrl.Result{RequeueAfter: runningInterval}, nil
+		}
 		starting(p, ReasonApplyFailed, err.Error())
 		stallAfterTimeout(p, &app, err.Error())
 		return ctrl.Result{}, err

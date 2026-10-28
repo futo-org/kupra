@@ -321,6 +321,31 @@ template:
 		}
 	})
 
+	t.Run("object the API server rejects", func(t *testing.T) {
+		createApp(t, "previews", "rejected", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: web
+      spec:
+        ports:
+          - port: 70000
+`)
+		rejected := &kuprav1alpha1.Preview{
+			ObjectMeta: metav1.ObjectMeta{Name: "rejected", Namespace: "previews"},
+			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "rejected"}},
+		}
+		if err := k8s.Create(ctx, rejected); err != nil {
+			t.Fatal(err)
+		}
+		p := waitForPhase(t, "previews", "rejected", kuprav1alpha1.PreviewFailed, "ApplyFailed")
+		if c := meta.FindStatusCondition(p.Status.Conditions, kuprav1alpha1.ConditionStalled); c == nil || c.Status != metav1.ConditionTrue {
+			t.Errorf("Stalled = %+v, want True straight away", c)
+		}
+	})
+
 	t.Run("app that fails its checks", func(t *testing.T) {
 		createApp(t, "previews", "broken", `
 template:
