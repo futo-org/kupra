@@ -187,17 +187,17 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, err
 	}
 	applied, err := applyAll(ctx, applier, rendered.Objects)
-	var retained []kuprav1alpha1.ResourceRef
+	var retained []corev1.TypedLocalObjectReference
 	if err == nil {
 		retained, err = r.prune(ctx, applier, nsName, p.Status.Inventory, applied)
 	}
 	if err != nil {
-		p.Status.Inventory = union(p.Status.Inventory, applied)
+		p.Status.Inventory = unionRefs(p.Status.Inventory, applied)
 		starting(p, ReasonApplyFailed, err.Error())
 		stallAfterTimeout(p, &app, err.Error())
 		return ctrl.Result{}, err
 	}
-	p.Status.Inventory = union(applied, retained)
+	p.Status.Inventory = unionRefs(applied, retained)
 
 	ready, message, err := readiness(ctx, applier, rendered.Objects)
 	if err != nil {
@@ -367,8 +367,8 @@ func (r *PreviewReconciler) applyObject(ctx context.Context, c client.Client, ob
 	return nil
 }
 
-func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) ([]kuprav1alpha1.ResourceRef, error) {
-	var applied []kuprav1alpha1.ResourceRef
+func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) ([]corev1.TypedLocalObjectReference, error) {
+	var applied []corev1.TypedLocalObjectReference
 	var errs []error
 	for _, obj := range objs {
 		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
@@ -381,32 +381,38 @@ func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstruc
 }
 
 // prune deletes resources that were applied before, but are no longer rendered. It keeps PersistentVolumeClaims, since they hold data the preview has built up, and returns them: they go with the preview's namespace.
-func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []kuprav1alpha1.ResourceRef) ([]kuprav1alpha1.ResourceRef, error) {
-	var retained []kuprav1alpha1.ResourceRef
+func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []corev1.TypedLocalObjectReference) ([]corev1.TypedLocalObjectReference, error) {
+	var retained []corev1.TypedLocalObjectReference
 	var errs []error
 	for _, ref := range previous {
-		if slices.ContainsFunc(current, func(c kuprav1alpha1.ResourceRef) bool { return sameObject(c, ref) }) {
+		if slices.ContainsFunc(current, func(c corev1.TypedLocalObjectReference) bool { return sameObject(c, ref) }) {
 			continue
 		}
-		if isVolumeClaim(ref.APIVersion, ref.Kind) {
+		if isVolumeClaim(refGroup(ref), ref.Kind) {
 			retained = append(retained, ref)
 			continue
 		}
+		mapping, err := r.Mapper.RESTMapping(schema.GroupKind{Group: refGroup(ref), Kind: ref.Kind})
+		if meta.IsNoMatchError(err) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		u := &unstructured.Unstructured{}
-		u.SetAPIVersion(ref.APIVersion)
-		u.SetKind(ref.Kind)
+		u.SetGroupVersionKind(mapping.GroupVersionKind)
 		u.SetNamespace(namespace)
 		u.SetName(ref.Name)
-		err := c.Delete(ctx, u, client.PropagationPolicy(metav1.DeletePropagationBackground))
-		if err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		if err := c.Delete(ctx, u, client.PropagationPolicy(metav1.DeletePropagationBackground)); client.IgnoreNotFound(err) != nil {
 			errs = append(errs, fmt.Errorf("deleting %s %s: %w", ref.Kind, ref.Name, err))
 		}
 	}
 	return retained, errors.Join(errs...)
 }
 
-func isVolumeClaim(apiVersion, kind string) bool {
-	return apiVersion == "v1" && kind == "PersistentVolumeClaim"
+func isVolumeClaim(group, kind string) bool {
+	return group == "" && kind == "PersistentVolumeClaim"
 }
 
 // readiness judges the applied resources with kstatus, the way Flux does.
@@ -414,7 +420,7 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 	var waiting []string
 	for _, obj := range objs {
 		// A claim is ready once it exists: storage that binds volumes when a pod first uses them would otherwise never be ready.
-		if isVolumeClaim(obj.GetAPIVersion(), obj.GetKind()) {
+		if isVolumeClaim(obj.GroupVersionKind().Group, obj.GetKind()) {
 			continue
 		}
 		live := &unstructured.Unstructured{}
@@ -512,15 +518,33 @@ func running(p *kuprav1alpha1.Preview) {
 	meta.RemoveStatusCondition(&p.Status.Conditions, kuprav1alpha1.ConditionStalled)
 }
 
-// sameObject reports whether two references are to the same object, possibly through different versions of its API.
-func sameObject(a, b kuprav1alpha1.ResourceRef) bool {
-	ga, _ := schema.ParseGroupVersion(a.APIVersion)
-	gb, _ := schema.ParseGroupVersion(b.APIVersion)
-	return ga.Group == gb.Group && a.Kind == b.Kind && a.Name == b.Name
+func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {
+	ref := corev1.TypedLocalObjectReference{Kind: obj.GetKind(), Name: obj.GetName()}
+	if group := obj.GroupVersionKind().Group; group != "" {
+		ref.APIGroup = &group
+	}
+	return ref
 }
 
-func refOf(obj *unstructured.Unstructured) kuprav1alpha1.ResourceRef {
-	return kuprav1alpha1.ResourceRef{APIVersion: obj.GetAPIVersion(), Kind: obj.GetKind(), Name: obj.GetName()}
+func refGroup(ref corev1.TypedLocalObjectReference) string {
+	if ref.APIGroup == nil {
+		return ""
+	}
+	return *ref.APIGroup
+}
+
+func sameObject(a, b corev1.TypedLocalObjectReference) bool {
+	return refGroup(a) == refGroup(b) && a.Kind == b.Kind && a.Name == b.Name
+}
+
+func unionRefs(a, b []corev1.TypedLocalObjectReference) []corev1.TypedLocalObjectReference {
+	out := slices.Clone(a)
+	for _, ref := range b {
+		if !slices.ContainsFunc(out, func(r corev1.TypedLocalObjectReference) bool { return sameObject(r, ref) }) {
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 const appRefIndex = ".spec.appRef.name"

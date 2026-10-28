@@ -3,22 +3,25 @@ package controller
 import (
 	"testing"
 
-	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestSameObject(t *testing.T) {
-	ref := func(apiVersion, kind, name string) kuprav1alpha1.ResourceRef {
-		return kuprav1alpha1.ResourceRef{APIVersion: apiVersion, Kind: kind, Name: name}
+	ref := func(group, kind, name string) corev1.TypedLocalObjectReference {
+		r := corev1.TypedLocalObjectReference{Kind: kind, Name: name}
+		if group != "" {
+			r.APIGroup = &group
+		}
+		return r
 	}
 	for _, tc := range []struct {
-		a, b kuprav1alpha1.ResourceRef
+		a, b corev1.TypedLocalObjectReference
 		want bool
 	}{
-		{ref("apps/v1", "Deployment", "web"), ref("apps/v1", "Deployment", "web"), true},
-		{ref("example.com/v1beta1", "Widget", "w"), ref("example.com/v1", "Widget", "w"), true},
-		{ref("v1", "ConfigMap", "config"), ref("v1", "Secret", "config"), false},
-		{ref("v1", "ConfigMap", "a"), ref("v1", "ConfigMap", "b"), false},
-		{ref("example.com/v1", "Widget", "w"), ref("example.org/v1", "Widget", "w"), false},
+		{ref("apps", "Deployment", "web"), ref("apps", "Deployment", "web"), true},
+		{ref("", "ConfigMap", "config"), ref("", "Secret", "config"), false},
+		{ref("", "ConfigMap", "a"), ref("", "ConfigMap", "b"), false},
+		{ref("example.com", "Widget", "w"), ref("example.org", "Widget", "w"), false},
 	} {
 		if got := sameObject(tc.a, tc.b); got != tc.want {
 			t.Errorf("sameObject(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)

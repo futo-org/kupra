@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -74,7 +75,7 @@ type PreviewStatus struct {
 	// Inventory lists the resources kupra applied for the preview.
 	// +optional
 	// +listType=atomic
-	Inventory []ResourceRef `json:"inventory,omitempty"`
+	Inventory []corev1.TypedLocalObjectReference `json:"inventory,omitempty"`
 
 	// +optional
 	// +listType=map
@@ -85,12 +86,6 @@ type PreviewStatus struct {
 type LinkStatus struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
-}
-
-type ResourceRef struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Name       string `json:"name"`
 }
 
 // +kubebuilder:object:root=true
