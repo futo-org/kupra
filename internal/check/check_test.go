@@ -28,43 +28,41 @@ const deploymentSchema = `
 type: object
 properties:
   spec:
-    allOf:
-      - type: object
+    type: object
+    properties:
+      replicas:
+        type: integer
+      template:
+        type: object
         properties:
-          replicas:
-            type: integer
-          template:
+          metadata:
             type: object
             properties:
-              metadata:
+              labels:
                 type: object
-                properties:
-                  labels:
-                    type: object
-                    additionalProperties:
+                additionalProperties:
+                  type: string
+          spec:
+            type: object
+            properties:
+              containers:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    image:
                       type: string
-              spec:
-                type: object
-                properties:
-                  containers:
-                    type: array
-                    items:
+                    args:
+                      type: array
+                      items:
+                        type: string
+                    resources:
                       type: object
                       properties:
-                        image:
-                          type: string
-                        args:
-                          type: array
-                          items:
-                            type: string
-                        resources:
+                        limits:
                           type: object
-                          properties:
-                            limits:
-                              type: object
-                              additionalProperties:
-                                x-kubernetes-int-or-string: true
-    default: {}
+                          additionalProperties:
+                            x-kubernetes-int-or-string: true
   status:
     type: object
     x-kubernetes-preserve-unknown-fields: true

@@ -82,7 +82,6 @@ func (c *Checker) Template(app *render.App, roleName string, rules []rbacv1.Poli
 // fieldSchema finds the schema for a field. It returns nil when nothing is known about the field's type.
 func fieldSchema(s *spec.Schema, path []any) (*spec.Schema, error) {
 	for i, elem := range path {
-		s = unwrap(s)
 		if s == nil {
 			return nil, nil
 		}
@@ -110,15 +109,7 @@ func fieldSchema(s *spec.Schema, path []any) (*spec.Schema, error) {
 			s = s.Items.Schema
 		}
 	}
-	return unwrap(s), nil
-}
-
-// unwrap returns the schema a field refers to. Fields with defaults wrap their $ref in an allOf.
-func unwrap(s *spec.Schema) *spec.Schema {
-	for s != nil && len(s.AllOf) == 1 && len(s.Type) == 0 && len(s.Properties) == 0 {
-		s = &s.AllOf[0]
-	}
-	return s
+	return s, nil
 }
 
 func preservesUnknownFields(s *spec.Schema) bool {
@@ -131,9 +122,8 @@ func intOrString(s *spec.Schema) bool {
 	return v
 }
 
-// fits reports whether a value of type t can fill in a field with schema s.
+// fits reports whether a value of type t can fill in a field with schema s. apiserver's SchemaDeclType, which CRD validation rules use, ignores x-kubernetes-preserve-unknown-fields and types objects as CEL objects that a map can't be assigned to, so this works on the OpenAPI schema directly.
 func fits(s *spec.Schema, t *cel.Type) bool {
-	s = unwrap(s)
 	if s == nil || t == nil || t.Kind() == types.DynKind || t.Kind() == types.AnyKind {
 		return true
 	}
