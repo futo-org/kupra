@@ -289,6 +289,7 @@ func TestOwnerValidation(t *testing.T) {
 		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"}, ok: true},
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Namespace: "flux-system", Name: "flux"}, ok: true},
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "flux"}, ok: false},
+		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, Name: ""}, ok: false},
 		{owner: rbacv1.Subject{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "reviewers"}, ok: true},
 		{owner: rbacv1.Subject{Kind: rbacv1.UserKind, APIGroup: "example.com", Name: "alice"}, ok: false},
 		{owner: rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, APIGroup: rbacv1.GroupName, Namespace: "flux-system", Name: "flux"}, ok: false},

@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -69,5 +71,24 @@ func TestStallAfterTimeout(t *testing.T) {
 				t.Error("Reconciling isn't True any more, but kupra keeps trying after the timeout")
 			}
 		})
+	}
+}
+
+func TestOwnerSubjects(t *testing.T) {
+	p := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"kupra.futo.tech/created-by": "system:serviceaccount:flux-system:flux"}},
+		Spec: kuprav1alpha1.PreviewSpec{Owners: []rbacv1.Subject{
+			{Kind: rbacv1.GroupKind, Name: "reviewers"},
+			{Kind: rbacv1.ServiceAccountKind, Namespace: "ci", Name: "Not_Valid"},
+			{Kind: rbacv1.ServiceAccountKind, Namespace: "ci", Name: "deployer"},
+		}},
+	}
+	want := []rbacv1.Subject{
+		{Kind: rbacv1.ServiceAccountKind, Namespace: "flux-system", Name: "flux"},
+		{APIGroup: rbacv1.GroupName, Kind: rbacv1.GroupKind, Name: "reviewers"},
+		{Kind: rbacv1.ServiceAccountKind, Namespace: "ci", Name: "deployer"},
+	}
+	if got := ownerSubjects(p); !slices.Equal(got, want) {
+		t.Errorf("ownerSubjects = %+v, want %+v", got, want)
 	}
 }

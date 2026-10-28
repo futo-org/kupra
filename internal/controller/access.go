@@ -9,6 +9,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -92,6 +93,10 @@ func ownerSubjects(p *kuprav1alpha1.Preview) []rbacv1.Subject {
 		subjects = append(subjects, userSubject(creator))
 	}
 	for _, o := range p.Spec.Owners {
+		// RoleBindings reject service accounts that can't exist, and one bad owner mustn't block the rest.
+		if o.Kind == rbacv1.ServiceAccountKind && (len(validation.IsDNS1123Subdomain(o.Name)) > 0 || len(validation.IsDNS1123Label(o.Namespace)) > 0) {
+			continue
+		}
 		if o.APIGroup == "" && (o.Kind == rbacv1.UserKind || o.Kind == rbacv1.GroupKind) {
 			o.APIGroup = rbacv1.GroupName
 		}

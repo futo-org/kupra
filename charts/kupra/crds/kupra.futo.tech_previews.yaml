@@ -105,6 +105,8 @@ spec:
                 x-kubernetes-validations:
                 - message: owners must be users, groups or service accounts
                   rule: self.all(s, s.kind in ['User', 'Group', 'ServiceAccount'])
+                - message: owners need a name
+                  rule: self.all(s, s.name != '')
                 - message: service account owners need a namespace
                   rule: self.all(s, s.kind != 'ServiceAccount' || (has(s.__namespace__)
                     && s.__namespace__ != ''))
