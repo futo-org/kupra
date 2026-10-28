@@ -32,7 +32,7 @@ func newEnv(parameters []kuprav1alpha1.Parameter) (*env, error) {
 		cel.Variable("preview.annotations", stringMap),
 	}
 	for _, p := range parameters {
-		opts = append(opts, cel.Variable("parameters."+p.Name, parameterType(p.Type)))
+		opts = append(opts, cel.Variable("parameters."+string(p.Name), parameterType(p.Type)))
 	}
 	celEnv, err := base.Extend(opts...)
 	if err != nil {

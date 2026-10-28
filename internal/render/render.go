@@ -98,16 +98,16 @@ func Compile(spec *kuprav1alpha1.PreviewAppSpec) (*App, field.ErrorList) {
 	app := &App{parameters: spec.Parameters}
 
 	for _, v := range spec.Variables {
-		vPath := specPath.Child("variables").Key(v.Name)
+		vPath := specPath.Child("variables").Key(string(v.Name))
 		prg, err := e.compile(v.Expression, nil)
 		outputType := cel.DynType
 		if err != nil {
 			errs = append(errs, field.Invalid(vPath.Child("expression"), v.Expression, err.Error()))
 		} else {
 			outputType = prg.outputType
-			app.variables = append(app.variables, namedProgram{v.Name, prg})
+			app.variables = append(app.variables, namedProgram{string(v.Name), prg})
 		}
-		if err := e.addVariable(v.Name, outputType); err != nil {
+		if err := e.addVariable(string(v.Name), outputType); err != nil {
 			errs = append(errs, field.Invalid(vPath.Child("name"), v.Name, err.Error()))
 		}
 	}

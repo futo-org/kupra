@@ -17,7 +17,7 @@ import (
 func checkParameters(params []kuprav1alpha1.Parameter, fldPath *field.Path) field.ErrorList {
 	var errs field.ErrorList
 	for _, p := range params {
-		pPath := fldPath.Key(p.Name)
+		pPath := fldPath.Key(string(p.Name))
 		var enum []any
 		for i, raw := range p.Enum {
 			v, err := parameterValue(p.Type, raw)
@@ -43,16 +43,16 @@ func checkParameters(params []kuprav1alpha1.Parameter, fldPath *field.Path) fiel
 func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiextensionsv1.JSON, fldPath *field.Path) (map[string]any, field.ErrorList) {
 	var errs field.ErrorList
 	for name := range values {
-		if !slices.ContainsFunc(params, func(p kuprav1alpha1.Parameter) bool { return p.Name == name }) {
+		if !slices.ContainsFunc(params, func(p kuprav1alpha1.Parameter) bool { return string(p.Name) == name }) {
 			errs = append(errs, field.NotFound(fldPath.Key(name), name))
 		}
 	}
 
 	out := map[string]any{}
 	for _, p := range params {
-		pPath := fldPath.Key(p.Name)
+		pPath := fldPath.Key(string(p.Name))
 		enum := enumValues(p)
-		raw, ok := values[p.Name]
+		raw, ok := values[string(p.Name)]
 		switch {
 		case ok:
 		case p.Default != nil:
@@ -66,7 +66,7 @@ func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiex
 				errs = append(errs, field.Required(pPath, "must be one of "+strings.Join(display(enum), ", ")))
 				continue
 			}
-			out[p.Name] = v
+			out[string(p.Name)] = v
 			continue
 		}
 
@@ -79,7 +79,7 @@ func resolveParameters(params []kuprav1alpha1.Parameter, values map[string]apiex
 			errs = append(errs, field.NotSupported(pPath, v, display(enum)))
 			continue
 		}
-		out[p.Name] = v
+		out[string(p.Name)] = v
 	}
 	return out, errs
 }

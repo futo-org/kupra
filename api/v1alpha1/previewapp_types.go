@@ -32,6 +32,11 @@ type PreviewAppSpec struct {
 	Template Template `json:"template"`
 }
 
+// Identifier is a name that expressions refer to, such as the tag in parameters.tag.
+// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+// +kubebuilder:validation:MaxLength=63
+type Identifier string
+
 // +kubebuilder:validation:Enum=string;integer;boolean
 type ParameterType string
 
@@ -42,8 +47,7 @@ const (
 )
 
 type Parameter struct {
-	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
-	Name string `json:"name"`
+	Name Identifier `json:"name"`
 
 	Title string `json:"title"`
 
@@ -91,8 +95,7 @@ type ImageTagHint struct {
 }
 
 type Variable struct {
-	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
-	Name string `json:"name"`
+	Name Identifier `json:"name"`
 
 	// Expression is a CEL expression.
 	Expression string `json:"expression"`

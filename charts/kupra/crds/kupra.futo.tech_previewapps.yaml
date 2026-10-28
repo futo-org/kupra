@@ -85,6 +85,9 @@ spec:
                       type: array
                       x-kubernetes-list-type: atomic
                     name:
+                      description: Identifier is a name that expressions refer to,
+                        such as the tag in parameters.tag.
+                      maxLength: 63
                       pattern: ^[A-Za-z_][A-Za-z0-9_]*$
                       type: string
                     required:
@@ -157,6 +160,9 @@ spec:
                       description: Expression is a CEL expression.
                       type: string
                     name:
+                      description: Identifier is a name that expressions refer to,
+                        such as the tag in parameters.tag.
+                      maxLength: 63
                       pattern: ^[A-Za-z_][A-Za-z0-9_]*$
                       type: string
                   required:
