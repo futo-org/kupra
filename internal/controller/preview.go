@@ -146,10 +146,12 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	// An existing preview namespace follows its policy even while the app is missing or failing its checks.
 	if namespaceExists {
 		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
-			if reason != "" {
-				pending(p, reason, message)
+			if err != nil {
+				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, err
+			// Nothing kupra watches tells it when a conflicting namespace goes away, so check again later.
+			pending(p, reason, message)
+			return ctrl.Result{RequeueAfter: recheckInterval}, nil
 		}
 	}
 
@@ -190,10 +192,12 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 
 	if !namespaceExists {
 		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
-			if reason != "" {
-				pending(p, reason, message)
+			if err != nil {
+				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, err
+			// Nothing kupra watches tells it when a conflicting namespace goes away, so check again later.
+			pending(p, reason, message)
+			return ctrl.Result{RequeueAfter: recheckInterval}, nil
 		}
 		if err := r.bindNamespaceAccess(ctx, p, nsName); err != nil {
 			return ctrl.Result{}, err
