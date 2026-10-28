@@ -99,7 +99,7 @@ func (e *env) compile(expression string, want *cel.Type) (*program, error) {
 	return &program{Program: prg, outputType: ast.OutputType()}, nil
 }
 
-// native converts an expression's result into a value for an unstructured object. It goes through CEL's JSON mapping, as MutatingAdmissionPolicy does for JSON patch values, and decodes whole numbers as integers the way Kubernetes does.
+// native converts an expression's result into a value for an unstructured object. It goes through CEL's JSON mapping, as MutatingAdmissionPolicy does for JSON patch values, and decodes whole numbers as integers the way Kubernetes does. Like JSON patch values, integers beyond ±2^53 come out as strings.
 func native(v ref.Val) (any, error) {
 	pb, err := v.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
 	if err != nil {
