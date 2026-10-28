@@ -170,18 +170,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, nil
 	}
 
-	if !namespaceExists {
-		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
-			if reason != "" {
-				pending(p, reason, message)
-			}
-			return ctrl.Result{}, err
-		}
-		if err := r.bindNamespaceAccess(ctx, p, nsName); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
+	// Render before creating anything, so a Preview with invalid parameters gets no namespace.
 	compiled, errs := render.Compile(&app.Spec)
 	if len(errs) > 0 {
 		failed(p, ReasonRenderFailed, errs.ToAggregate().Error())
@@ -198,6 +187,18 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, nil
 	}
 	p.Status.Links = rendered.Links
+
+	if !namespaceExists {
+		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
+			if reason != "" {
+				pending(p, reason, message)
+			}
+			return ctrl.Result{}, err
+		}
+		if err := r.bindNamespaceAccess(ctx, p, nsName); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	applier, err := r.impersonate(accountName)
 	if err != nil {

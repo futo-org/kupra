@@ -272,7 +272,7 @@ template:
 		conflict := controller.PreviewNamespaceName("previews", "taken")
 		createNamespace(t, conflict, nil)
 		taken := &kuprav1alpha1.Preview{
-			ObjectMeta: metav1.ObjectMeta{Name: "taken", Namespace: "previews"},
+			ObjectMeta: metav1.ObjectMeta{Name: "taken", Namespace: "previews", Labels: map[string]string{"example.com/pull-request": "2"}},
 			Spec:       kuprav1alpha1.PreviewSpec{AppRef: kuprav1alpha1.LocalObjectReference{Name: "app"}},
 		}
 		if err := k8s.Create(ctx, taken); err != nil {
@@ -300,6 +300,24 @@ template:
 		})
 		if err := k8s.Get(ctx, client.ObjectKeyFromObject(account), account); err != nil {
 			t.Errorf("the other Preview's account: %v", err)
+		}
+	})
+
+	t.Run("invalid parameters", func(t *testing.T) {
+		invalid := &kuprav1alpha1.Preview{
+			ObjectMeta: metav1.ObjectMeta{Name: "invalid", Namespace: "previews"},
+			Spec: kuprav1alpha1.PreviewSpec{
+				AppRef:     kuprav1alpha1.LocalObjectReference{Name: "app"},
+				Parameters: map[string]string{"service": "maybe"},
+			},
+		}
+		if err := k8s.Create(ctx, invalid); err != nil {
+			t.Fatal(err)
+		}
+		p := waitForPhase(t, "previews", "invalid", kuprav1alpha1.PreviewFailed, "RenderFailed")
+		var ns corev1.Namespace
+		if err := k8s.Get(ctx, client.ObjectKey{Name: p.Status.Namespace}, &ns); !apierrors.IsNotFound(err) {
+			t.Errorf("namespace %s exists (%v), want none for a Preview that can't render", p.Status.Namespace, err)
 		}
 	})
 
