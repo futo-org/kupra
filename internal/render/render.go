@@ -140,7 +140,13 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 		return nil, field.ErrorList{field.Invalid(fldPath, string(raw.Raw), err.Error())}
 	}
 
+	// kupra needs a resource's kind and metadata before rendering, to check it and to apply it.
 	var errs field.ErrorList
+	for _, key := range []string{"apiVersion", "kind", "metadata"} {
+		if _, ok := obj[key+exprSuffix]; ok {
+			errs = append(errs, field.Forbidden(fldPath.Child(key+exprSuffix), fmt.Sprintf("%s can't be given as an expression", key)))
+		}
+	}
 	for _, key := range []string{"apiVersion", "kind"} {
 		if s, _ := obj[key].(string); s == "" {
 			errs = append(errs, field.Required(fldPath.Child(key), ""))

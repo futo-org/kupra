@@ -242,6 +242,28 @@ template:
 			want: "spec.template.resources[0].metadata.namespace: Forbidden: kupra sets each resource's namespace",
 		},
 		{
+			name: "kind as an expression",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kindExpr: '"ConfigMap"'
+      metadata: {name: config}
+`,
+			want: "spec.template.resources[0].kindExpr: Forbidden: kind can't be given as an expression",
+		},
+		{
+			name: "metadata as an expression",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadataExpr: '{"name": "config"}'
+`,
+			want: "spec.template.resources[0].metadataExpr: Forbidden: metadata can't be given as an expression",
+		},
+		{
 			name: "missing name and kind",
 			spec: `
 template:
