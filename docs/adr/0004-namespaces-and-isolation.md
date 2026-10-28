@@ -19,7 +19,7 @@ Keeping the Preview object outside the namespace it manages means creating a pre
 
 ### Naming
 
-A preview's namespace is named `<namespace>-<preview>-<hash>`: the Preview's own namespace and name, plus a short hash of both. So Preview `pr-1234` in `immich-previews` runs in something like `immich-previews-pr-1234-7f3a`. Without the hash, different pairs could produce the same name: namespace `a-b` with preview `c`, and namespace `a` with preview `b-c`. If the name is longer than Kubernetes allows, kupra shortens the readable part. The Preview's status records the namespace it actually uses.
+A preview's namespace is named `<namespace>-<preview>-<hash>`: the Preview's own namespace and name, plus an eight-character hash of both. So Preview `pr-1234` in `immich-previews` runs in something like `immich-previews-pr-1234-7f3a9c2e`. Without the hash, different pairs could produce the same name: namespace `a-b` with preview `c`, and namespace `a` with preview `b-c`. If the name is longer than Kubernetes allows, kupra shortens the readable part. Then only the hash tells apart names that share a long prefix, so it has to be long enough not to collide. The Preview's status records the namespace it actually uses.
 
 kupra labels every preview namespace, so other tools can recognise and select them:
 
@@ -27,7 +27,7 @@ kupra labels every preview namespace, so other tools can recognise and select th
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: immich-previews-pr-1234-7f3a
+  name: immich-previews-pr-1234-7f3a9c2e
   annotations:
     kupra.futo.tech/preview-uid: 0b1c2d3e-...
   labels:
@@ -81,5 +81,5 @@ Not every kupra label is safe to grant access on. PreviewApp names aren't unique
 - Templates can't include cluster-scoped resources. Apps that need an operator rely on one installed in the cluster.
 - Admins define what templates may create, and the network, quota and Pod Security settings, in PreviewPolicies. kupra ships a default one.
 - Inbound traffic to previews is open within the cluster. Clusters that run other untrusted workloads should restrict it in their policy.
-- Preview namespace names are derived, end in a short hash, and are occasionally shortened. The Preview's status is the source of truth.
+- Preview namespace names are derived, end in a hash, and are occasionally shortened. The Preview's status is the source of truth.
 - Shared infrastructure has to be configured to accept preview namespaces, which kupra's labels make straightforward.

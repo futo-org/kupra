@@ -8,12 +8,21 @@ import (
 )
 
 func TestPreviewNamespaceName(t *testing.T) {
-	if a, b := previewNamespaceName("a-b", "c"), previewNamespaceName("a", "b-c"); a == b {
-		t.Errorf("a-b/c and a/b-c both give %s", a)
+	// Pairs that collided with a 4-character hash, through dots becoming dashes, a-b/c against a/b-c, and shortening.
+	for _, pair := range [][2][2]string{
+		{{"previews", "pr-125809"}, {"previews", "pr.125809"}},
+		{{"immich-previews", "pr-72950"}, {"immich", "previews-pr-72950"}},
+		{{"immich-previews", "feature-add-support-for-something-long-pr-82"}, {"immich-previews", "feature-add-support-for-something-long-pr-314"}},
+		{{"platform-engineering-pull-request-preview-environments-prod", "pr-164"}, {"platform-engineering-pull-request-preview-environments-prod", "pr-287"}},
+	} {
+		a, b := previewNamespaceName(pair[0][0], pair[0][1]), previewNamespaceName(pair[1][0], pair[1][1])
+		if a == b {
+			t.Errorf("%s/%s and %s/%s both give %s", pair[0][0], pair[0][1], pair[1][0], pair[1][1], a)
+		}
 	}
 
 	got := previewNamespaceName("immich-previews", "pr-1234")
-	if !strings.HasPrefix(got, "immich-previews-pr-1234-") || len(got) != len("immich-previews-pr-1234-")+4 {
+	if !strings.HasPrefix(got, "immich-previews-pr-1234-") || len(got) != len("immich-previews-pr-1234-")+8 {
 		t.Errorf("got %s, want immich-previews-pr-1234-<hash>", got)
 	}
 
