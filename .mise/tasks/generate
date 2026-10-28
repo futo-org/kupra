@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-#MISE description="Generate deepcopy code and CRDs"
+#MISE description="Generate deepcopy code, CRDs and RBAC"
 set -euo pipefail
 
 controller-gen object paths=./api/...
 controller-gen crd paths=./api/... output:crd:artifacts:config=charts/kupra/crds
+controller-gen rbac:roleName=kupra-operator paths=./internal/... output:rbac:artifacts:config=charts/kupra/templates

@@ -1,6 +1,6 @@
 # 5. Policies
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-20
 
 ## Context
@@ -74,13 +74,15 @@ spec:
 - **`networkPolicies`**, **`resourceQuota`** and **`limitRange`** are created in each preview namespace as written. A quota counts what pods request, and is checked when pods are created. It doesn't reserve capacity or cap actual usage, which is what the limit range's default limits are for.
 - **`namespaceMetadata`** adds labels and annotations to preview namespaces. That covers Pod Security admission, which is configured by namespace labels, and labels that shared infrastructure or other tools select namespaces by.
 
-Fields a policy leaves out get kupra's built-in defaults, not nothing. kupra's built-in namespace labels, including Pod Security's `enforce: baseline`, are merged under the policy's own, so adding an unrelated label doesn't drop them. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.
+kupra installs the `default` policy with every setting spelled out, like the example above, and admins change the defaults by changing it. Other policies fall back to `default` for any field they leave out, one level deep. Labels and annotations are merged, with the policy's own over `default`'s, so adding an unrelated label doesn't drop Pod Security's `enforce: baseline`. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.
 
 Limits that belong to admins, such as how many previews may run at once, are anticipated as further fields.
 
 ### The role templates are applied with
 
 kupra ships a ClusterRole for templates that covers common workloads: Deployments, StatefulSets, Jobs, Services, ConfigMaps, Secrets, PersistentVolumeClaims, Gateway API routes, and the kinds of state kupra supports. It aggregates any ClusterRole labelled `kupra.futo.tech/aggregate-to-template: "true"`, the way Kubernetes' built-in `edit` and `admin` roles do. So an admin can allow, say, ExternalSecrets or an operator's resources for every app by adding one small ClusterRole, or point a single app's policy at a different role altogether.
+
+kupra can only bind the roles it has been allowed to. It may bind its own template role. An admin who points a policy at a different role must also allow kupra to bind it, with a ClusterRole labelled `kupra.futo.tech/aggregate-to-operator: "true"` that grants `bind` on it. So kupra can never hand out other roles, such as `cluster-admin`, even through a bug. The PreviewApp's checks report a policy role that kupra isn't allowed to bind.
 
 ### How an app gets a policy
 
@@ -98,7 +100,8 @@ kupra applies policy changes to existing previews straight away: it updates the 
 - **Namespaced policies in the app's namespace.** Whoever controls that namespace could loosen their own confinement.
 - **Policies that select namespaces.** Overlapping selectors need precedence rules, which makes it hard to see which policy applies.
 - **PreviewApps naming their own policy, gated by permission to use it.** This is roughly how PodSecurityPolicy worked, and that was removed from Kubernetes partly because it was hard to tell which policy applied to what.
-- **Policies that inherit from or merge with each other.** More flexible, but harder to read. Built-in defaults for omitted fields cover the common case.
+- **Defaults built into kupra's code.** Admins couldn't see them as a resource, or change them.
+- **Policies that inherit from each other in chains.** More flexible, but harder to read. Falling back to `default`, one level deep, covers the common case.
 - **Applying templates with Kubernetes' built-in `edit` role.** It already covers most workloads, and many operators extend it. But it includes NetworkPolicies, which templates mustn't create, and what it contains is decided by every operator installed in the cluster, not by kupra's admins.
 - **Leaving it to a policy engine.** Kyverno, for example, can generate network policies and quotas for namespaces with a given label, and kupra's labels make that possible on top. But secure defaults shouldn't depend on installing one, and the role templates are applied with is kupra's own concern.
 
