@@ -605,6 +605,7 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 		return ctrl.Result{}, false, err
 	}
 
+	p.Status.ObservedGeneration = p.Generation
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonTerminating, "")
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))

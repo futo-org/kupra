@@ -8,6 +8,7 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,6 +111,14 @@ func nextCapture(snapshots []kuprav1alpha1.PreviewSnapshot) *kuprav1alpha1.Previ
 
 // reconcileCapture continues a running capture, holding back template changes so the snapshot matches the parameters it records.
 func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alpha1.Preview, s *kuprav1alpha1.PreviewSnapshot, applier client.Client, namespace string) (ctrl.Result, error) {
+	// A capture can't be moved into a namespace that's being deleted.
+	var ns corev1.Namespace
+	if err := r.APIReader.Get(ctx, client.ObjectKey{Name: s.Namespace}, &ns); err != nil {
+		return ctrl.Result{}, err
+	}
+	if !ns.DeletionTimestamp.IsZero() {
+		return ctrl.Result{RequeueAfter: nextStepInterval}, r.finishSnapshot(ctx, s, nil, fmt.Sprintf("namespace %s is being deleted", s.Namespace))
+	}
 	if s.Spec.Mode != kuprav1alpha1.SnapshotOnline {
 		gone, err := r.remove(ctx, applier, namespace, workloadEntries(p.Status.Inventory))
 		if err != nil {

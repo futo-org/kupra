@@ -588,3 +588,52 @@ func TestHoldSnapshotBeingDeleted(t *testing.T) {
 		t.Errorf("snapshot finalizers = %v, want no hold on a snapshot being deleted", snap.Finalizers)
 	}
 }
+
+func TestCaptureInDeletedNamespace(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	createNamespace(t, "going", nil)
+	createApp(t, "going", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+`)
+	preview := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "source", Namespace: "going"},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
+	}
+	if err := k8s.Create(ctx, preview); err != nil {
+		t.Fatal(err)
+	}
+	p := waitForPhase(t, "going", "source", kuprav1alpha1.PreviewRunning, "Succeeded")
+	snap := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap", Namespace: "going"},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "source"}}},
+	}
+	if err := k8s.Create(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	waitForVolumeSnapshot(t, p.Status.Namespace, controller.LabelSnapshotUID, string(snap.UID))
+
+	// envtest has no namespace controller, so the namespace's objects are deleted here.
+	for _, obj := range []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "going"}}, snap, preview} {
+		if err := k8s.Delete(ctx, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), &kuprav1alpha1.PreviewSnapshot{}); !apierrors.IsNotFound(err) {
+			return fmt.Errorf("PreviewSnapshot snap still exists (%v)", err)
+		}
+		return nil
+	})
+	waitForPhase(t, "going", "source", kuprav1alpha1.PreviewTerminating, controller.ReasonTerminating)
+}
