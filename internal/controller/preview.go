@@ -35,6 +35,7 @@ import (
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/policy"
 	"github.com/futo-org/kupra/internal/render"
+	"github.com/futo-org/kupra/internal/state"
 )
 
 const (
@@ -208,13 +209,41 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	applied, err := applyAll(ctx, applier, rendered.Objects)
-	var retained []corev1.TypedLocalObjectReference
+
+	// State goes first, so data and claims are in place before anything uses them.
+	var states []*unstructured.Unstructured
+	var workload []*unstructured.Unstructured
+	for _, obj := range rendered.Objects {
+		if kind, ok := state.For(obj.GroupVersionKind().GroupKind()); ok && !obj.NotState {
+			states = append(states, kind.Restore(obj.Unstructured))
+			continue
+		}
+		workload = append(workload, obj.Unstructured)
+	}
+
+	applied, err := applyAll(ctx, applier, states, true)
+	if err == nil {
+		var ready bool
+		var message string
+		ready, message, err = readiness(ctx, applier, states)
+		if err == nil && !ready {
+			p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
+			provisioning(p, message)
+			stallAfterTimeout(p, &app, message)
+			return ctrl.Result{RequeueAfter: startingInterval}, nil
+		}
+	}
+	if err == nil {
+		var appliedWorkload []kuprav1alpha1.InventoryEntry
+		appliedWorkload, err = applyAll(ctx, applier, workload, false)
+		applied = append(applied, appliedWorkload...)
+	}
+	var retained []kuprav1alpha1.InventoryEntry
 	if err == nil {
 		retained, err = r.prune(ctx, applier, nsName, p.Status.Inventory, applied)
 	}
 	if err != nil {
-		p.Status.Inventory = unionRefs(p.Status.Inventory, applied)
+		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
 		// An object the API server rejects as invalid stays invalid until the template or parameters change, and those changes requeue the preview.
 		if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
 			failed(p, ReasonApplyFailed, err.Error())
@@ -224,9 +253,9 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		stallAfterTimeout(p, &app, err.Error())
 		return ctrl.Result{}, err
 	}
-	p.Status.Inventory = unionRefs(applied, retained)
+	p.Status.Inventory = unionInventory(applied, retained)
 
-	ready, message, err := readiness(ctx, applier, rendered.Objects)
+	ready, message, err := readiness(ctx, applier, workload)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -414,29 +443,31 @@ func (r *PreviewReconciler) applyObject(ctx context.Context, c client.Client, ob
 	return nil
 }
 
-func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) ([]corev1.TypedLocalObjectReference, error) {
-	var applied []corev1.TypedLocalObjectReference
+func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
+	var applied []kuprav1alpha1.InventoryEntry
 	var errs []error
 	for _, obj := range objs {
 		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
 			errs = append(errs, fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err))
 			continue
 		}
-		applied = append(applied, refOf(obj))
+		applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: refOf(obj), State: isState})
 	}
 	return applied, errors.Join(errs...)
 }
 
-// prune deletes resources that were applied before, but are no longer rendered. It keeps PersistentVolumeClaims, since they hold data the preview has built up, and returns them: they go with the preview's namespace.
-func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []corev1.TypedLocalObjectReference) ([]corev1.TypedLocalObjectReference, error) {
-	var retained []corev1.TypedLocalObjectReference
+// prune deletes resources that were applied before, but are no longer rendered. It keeps state, since it holds data the preview has built up, and returns it: it goes when the preview is reset or deleted.
+func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
+	var retained []kuprav1alpha1.InventoryEntry
 	var errs []error
-	for _, ref := range previous {
-		if slices.ContainsFunc(current, func(c corev1.TypedLocalObjectReference) bool { return sameObject(c, ref) }) {
+	for _, entry := range previous {
+		ref := entry.TypedLocalObjectReference
+		if slices.ContainsFunc(current, func(c kuprav1alpha1.InventoryEntry) bool { return sameObject(c.TypedLocalObjectReference, ref) }) {
 			continue
 		}
-		if isState(refGroup(ref), ref.Kind) {
-			retained = append(retained, ref)
+		if entry.State {
+			entry.Retained = true
+			retained = append(retained, entry)
 			continue
 		}
 		mapping, err := r.Mapper.RESTMapping(schema.GroupKind{Group: refGroup(ref), Kind: ref.Kind})
@@ -458,22 +489,26 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 	return retained, errors.Join(errs...)
 }
 
-// isState reports whether a kind of resource holds state, which kupra keeps when it drops out of a template. For now, that's only PersistentVolumeClaims.
-func isState(group, kind string) bool {
-	return group == "" && kind == "PersistentVolumeClaim"
-}
-
-// readiness judges the applied resources with kstatus, the way Flux does.
+// readiness judges applied resources: those of a kind kupra supports as state by that kind's own rules, and anything else with kstatus, the way Flux does.
 func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) (bool, string, error) {
 	var waiting []string
 	for _, obj := range objs {
-		// A claim is ready once it exists: storage that binds volumes when a pod first uses them would otherwise never be ready.
-		if gvk := obj.GroupVersionKind(); gvk.Group == "" && gvk.Kind == "PersistentVolumeClaim" {
-			continue
-		}
 		live := &unstructured.Unstructured{}
 		live.SetGroupVersionKind(obj.GroupVersionKind())
-		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
+		err := c.Get(ctx, client.ObjectKeyFromObject(obj), live)
+		if client.IgnoreNotFound(err) != nil {
+			return false, "", err
+		}
+		if kind, ok := state.For(obj.GroupVersionKind().GroupKind()); ok {
+			if apierrors.IsNotFound(err) {
+				live = nil
+			}
+			if !kind.Ready(live) {
+				waiting = append(waiting, fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName()))
+			}
+			continue
+		}
+		if err != nil {
 			return false, "", err
 		}
 		res, err := status.Compute(live)
@@ -543,6 +578,11 @@ func failed(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewFailed
 }
 
+func provisioning(p *kuprav1alpha1.Preview, message string) {
+	starting(p, meta.ProgressingReason, message)
+	p.Status.Phase = kuprav1alpha1.PreviewProvisioning
+}
+
 func starting(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStarting
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
@@ -576,11 +616,14 @@ func sameObject(a, b corev1.TypedLocalObjectReference) bool {
 	return refGroup(a) == refGroup(b) && a.Kind == b.Kind && a.Name == b.Name
 }
 
-func unionRefs(a, b []corev1.TypedLocalObjectReference) []corev1.TypedLocalObjectReference {
+// unionInventory adds the entries of b that a doesn't have to a.
+func unionInventory(a, b []kuprav1alpha1.InventoryEntry) []kuprav1alpha1.InventoryEntry {
 	out := slices.Clone(a)
-	for _, ref := range b {
-		if !slices.ContainsFunc(out, func(r corev1.TypedLocalObjectReference) bool { return sameObject(r, ref) }) {
-			out = append(out, ref)
+	for _, entry := range b {
+		if !slices.ContainsFunc(out, func(e kuprav1alpha1.InventoryEntry) bool {
+			return sameObject(e.TypedLocalObjectReference, entry.TypedLocalObjectReference)
+		}) {
+			out = append(out, entry)
 		}
 	}
 	return out

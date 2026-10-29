@@ -134,10 +134,12 @@ func TestTemplate(t *testing.T) {
 	deployment := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
 	configMap := schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 	clusterRole := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
+	claim := schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolumeClaim"}
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(deployment, meta.RESTScopeNamespace)
 	mapper.Add(configMap, meta.RESTScopeNamespace)
 	mapper.Add(clusterRole, meta.RESTScopeRoot)
+	mapper.Add(claim, meta.RESTScopeNamespace)
 
 	var spec kuprav1alpha1.PreviewAppSpec
 	if err := yaml.UnmarshalStrict([]byte(`
@@ -162,6 +164,18 @@ template:
     - apiVersion: example.com/v1
       kind: Widget
       metadata: {name: widget}
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata: {name: data}
+      spec:
+        dataSourceRef: {kind: VolumeSnapshot, name: data}
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: imported
+        annotations: {kupra.futo.tech/state: "false"}
+      spec:
+        dataSourceRef: {kind: VolumeSnapshot, name: imported}
 `), &spec); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +185,7 @@ template:
 	}
 
 	c := &Checker{Mapper: mapper, Schemas: schemas{deployment: mustSchema(t, deploymentSchema)}}
-	rules := []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: ApplyVerbs}}
+	rules := []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: ApplyVerbs}, {APIGroups: []string{""}, Resources: []string{"persistentvolumeclaims"}, Verbs: ApplyVerbs}}
 	got := c.Template(app, "kupra-preview-template", rules).ToAggregate().Error()
 	for _, want := range []string{
 		`spec.template.resources[0].spec.replicasExpr: Invalid value: "string": must evaluate to an integer`,
@@ -179,9 +193,13 @@ template:
 		`spec.template.resources[1].kind: Forbidden: the policy's ClusterRole kupra-preview-template doesn't allow get, create, patch, delete on configmaps`,
 		`spec.template.resources[2].kind: Forbidden: ClusterRole is cluster-scoped, and templates can only contain namespaced resources`,
 		`spec.template.resources[3].kind: Invalid value: "Widget": no matches for kind "Widget" in version "example.com/v1"`,
+		`spec.template.resources[4].spec.dataSourceRef: Forbidden: kupra sets the data source of claims it handles as state`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("errors = %q\nwant them to contain %q", got, want)
 		}
+	}
+	if strings.Contains(got, "resources[5]") {
+		t.Errorf("errors = %q\nwant none for the claim that isn't state", got)
 	}
 }

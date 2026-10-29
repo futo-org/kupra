@@ -18,8 +18,15 @@ import (
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
 
-// IncludeAnnotation holds a CEL expression that decides whether a template resource is rendered.
-const IncludeAnnotation = "kupra.futo.tech/include"
+// Per-resource settings are annotations that each hold a CEL expression evaluating to a bool. Leaving one out means true.
+const (
+	// IncludeAnnotation decides whether a template resource is rendered.
+	IncludeAnnotation = "kupra.futo.tech/include"
+	// StateAnnotation decides whether a resource of a kind kupra supports is handled as state.
+	StateAnnotation = "kupra.futo.tech/state"
+)
+
+var settingAnnotations = []string{IncludeAnnotation, StateAnnotation}
 
 const exprSuffix = "Expr"
 
@@ -37,16 +44,19 @@ type namedProgram struct {
 }
 
 type resource struct {
-	object      map[string]any
-	path        *field.Path
-	gvk         schema.GroupVersionKind
-	include     *program
+	object map[string]any
+	path   *field.Path
+	gvk    schema.GroupVersionKind
+	// settings holds the compiled per-resource settings, by annotation.
+	settings    map[string]*program
 	exprs       map[string]*program
 	expressions []Expression
 }
 
 // Resource is a template resource, as far as checks need it.
 type Resource struct {
+	// Object is the resource as written, with its expressions.
+	Object           map[string]any
 	Path             *field.Path
 	GroupVersionKind schema.GroupVersionKind
 	Expressions      []Expression
@@ -65,7 +75,7 @@ type Expression struct {
 func (a *App) Resources() []Resource {
 	out := make([]Resource, len(a.resources))
 	for i, r := range a.resources {
-		out[i] = Resource{Path: r.path, GroupVersionKind: r.gvk, Expressions: r.expressions}
+		out[i] = Resource{Object: r.object, Path: r.path, GroupVersionKind: r.gvk, Expressions: r.expressions}
 	}
 	return out
 }
@@ -79,9 +89,16 @@ type Preview struct {
 	Annotations map[string]string
 }
 
+// Object is a rendered resource.
+type Object struct {
+	*unstructured.Unstructured
+	// NotState is set when the state annotation opts the resource out of being handled as state.
+	NotState bool
+}
+
 // Result is a rendered preview.
 type Result struct {
-	Objects []*unstructured.Unstructured
+	Objects []Object
 	Links   []kuprav1alpha1.LinkStatus
 }
 
@@ -171,21 +188,25 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 	apiVersion, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
 	r := &resource{
-		object: obj,
-		path:   fldPath,
-		gvk:    schema.FromAPIVersionAndKind(apiVersion, kind),
-		exprs:  map[string]*program{},
+		object:   obj,
+		path:     fldPath,
+		gvk:      schema.FromAPIVersionAndKind(apiVersion, kind),
+		exprs:    map[string]*program{},
+		settings: map[string]*program{},
 	}
 	if annotations, ok := metadata["annotations"].(map[string]any); ok {
-		if include, ok := annotations[IncludeAnnotation].(string); ok {
-			prg, err := e.compile(include, cel.BoolType)
-			if err != nil {
-				errs = append(errs, field.Invalid(metaPath.Child("annotations").Key(IncludeAnnotation), include, err.Error()))
+		for _, key := range settingAnnotations {
+			keyPath := metaPath.Child("annotations").Key(key)
+			if expression, ok := annotations[key].(string); ok {
+				prg, err := e.compile(expression, cel.BoolType)
+				if err != nil {
+					errs = append(errs, field.Invalid(keyPath, expression, err.Error()))
+				}
+				r.settings[key] = prg
 			}
-			r.include = prg
-		}
-		if _, ok := annotations[IncludeAnnotation+exprSuffix]; ok {
-			errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(IncludeAnnotation+exprSuffix), fmt.Sprintf("%s already holds an expression, so give it as a plain annotation", IncludeAnnotation)))
+			if _, ok := annotations[key+exprSuffix]; ok {
+				errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(key+exprSuffix), fmt.Sprintf("%s already holds an expression, so give it as a plain annotation", key)))
+			}
 		}
 	}
 	errs = append(errs, compileFields(e, obj, fldPath, nil, r)...)
@@ -265,19 +286,16 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 
 	seen := map[string]bool{}
 	for _, r := range a.resources {
-		if r.include != nil {
-			includePath := r.path.Child("metadata", "annotations").Key(IncludeAnnotation)
-			out, _, err := r.include.Eval(activation)
+		settings := map[string]bool{}
+		for _, key := range settingAnnotations {
+			v, err := r.setting(key, activation)
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", includePath, err)
+				return nil, err
 			}
-			include, ok := out.(types.Bool)
-			if !ok {
-				return nil, fmt.Errorf("%s: must evaluate to bool, not %s", includePath, out.Type().TypeName())
-			}
-			if !include {
-				continue
-			}
+			settings[key] = v
+		}
+		if !settings[IncludeAnnotation] {
+			continue
 		}
 
 		obj := runtime.DeepCopyJSONValue(r.object).(map[string]any)
@@ -285,9 +303,11 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 			return nil, err
 		}
 		u := &unstructured.Unstructured{Object: obj}
-		// Whether to include a resource is decided before rendering it, so the annotation can't come from metadata.annotationsExpr.
-		if _, ok := u.GetAnnotations()[IncludeAnnotation]; ok && r.include == nil {
-			return nil, fmt.Errorf("%s: %s can't be given by an expression", r.path.Child("metadata", "annotationsExpr"), IncludeAnnotation)
+		// Settings are decided before rendering a resource, so they can't come from metadata.annotationsExpr.
+		for _, key := range settingAnnotations {
+			if _, ok := u.GetAnnotations()[key]; ok && r.settings[key] == nil {
+				return nil, fmt.Errorf("%s: %s can't be given by an expression", r.path.Child("metadata", "annotationsExpr"), key)
+			}
 		}
 		if u.GetName() == "" {
 			return nil, fmt.Errorf("%s: name is required", r.path.Child("metadata", "name"))
@@ -299,9 +319,27 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 			return nil, fmt.Errorf("%s: more than one %s named %s", r.path, u.GetKind(), u.GetName())
 		}
 		seen[key] = true
-		result.Objects = append(result.Objects, u)
+		result.Objects = append(result.Objects, Object{Unstructured: u, NotState: !settings[StateAnnotation]})
 	}
 	return result, nil
+}
+
+// setting evaluates a per-resource setting, which is true when it isn't given.
+func (r *resource) setting(key string, activation map[string]any) (bool, error) {
+	prg := r.settings[key]
+	if prg == nil {
+		return true, nil
+	}
+	fldPath := r.path.Child("metadata", "annotations").Key(key)
+	out, _, err := prg.Eval(activation)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", fldPath, err)
+	}
+	v, ok := out.(types.Bool)
+	if !ok {
+		return false, fmt.Errorf("%s: must evaluate to bool, not %s", fldPath, out.Type().TypeName())
+	}
+	return bool(v), nil
 }
 
 func evalFields(value any, fldPath *field.Path, target []any, exprs map[string]*program, activation map[string]any) error {

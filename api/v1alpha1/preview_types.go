@@ -62,12 +62,23 @@ type PreviewStatus struct {
 	// Inventory lists the resources kupra applied for the preview.
 	// +optional
 	// +listType=atomic
-	Inventory []corev1.TypedLocalObjectReference `json:"inventory,omitempty"`
+	Inventory []InventoryEntry `json:"inventory,omitempty"`
 
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// InventoryEntry is a resource kupra applied for a preview.
+type InventoryEntry struct {
+	corev1.TypedLocalObjectReference `json:",inline"`
+	// State is set for resources kupra handles as state. It keeps them when they're no longer rendered.
+	// +optional
+	State bool `json:"state,omitempty"`
+	// Retained is set for state that's no longer rendered, which kupra keeps until the preview is reset or deleted.
+	// +optional
+	Retained bool `json:"retained,omitempty"`
 }
 
 type LinkStatus struct {
