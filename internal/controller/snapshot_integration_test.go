@@ -466,8 +466,16 @@ template:
 		t.Fatal(err)
 	}
 
-	// The API server refuses the claim, so it isn't restored yet.
-	p := waitForPhase(t, "restore-retries", "retry", kuprav1alpha1.PreviewStarting, controller.ReasonApplyFailed)
+	// The API server refuses the claim, so it isn't restored yet. Depending on how it refuses it, kupra fails the preview or retries.
+	var p *kuprav1alpha1.Preview
+	eventually(t, func() error {
+		p = getPreview(t, "restore-retries", "retry")
+		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
+		if c == nil || c.Reason != controller.ReasonApplyFailed {
+			return fmt.Errorf("Preview retry: Ready %+v, want reason %s", c, controller.ReasonApplyFailed)
+		}
+		return nil
+	})
 	if apimeta.IsStatusConditionTrue(p.Status.Conditions, controller.ConditionRestored) {
 		t.Error("Restored is true before the claim exists")
 	}
