@@ -74,7 +74,7 @@ spec:
 - **`networkPolicies`**, **`resourceQuota`** and **`limitRange`** are created in each preview namespace as written. A quota counts what pods request, and is checked when pods are created. It doesn't reserve capacity or cap actual usage, which is what the limit range's default limits are for.
 - **`namespaceMetadata`** adds labels and annotations to preview namespaces. That covers Pod Security admission, which is configured by namespace labels, and labels that shared infrastructure or other tools select namespaces by.
 
-kupra installs the `default` policy with every setting spelled out, like the example above, and admins change the defaults by changing it. Other policies fall back to `default` for any field they leave out, one level deep. Labels and annotations are merged, with the policy's own over `default`'s, so adding an unrelated label doesn't drop Pod Security's `enforce: baseline`. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.
+kupra's chart installs the `default` policy with every setting spelled out, like the example above. Admins change the defaults through the chart's values, so upgrades keep their changes. Other policies fall back to `default` for any field they leave out, one level deep. Labels and annotations are merged, with the policy's own over `default`'s, so adding an unrelated label doesn't drop Pod Security's `enforce: baseline`. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.
 
 Limits that belong to admins, such as how many previews may run at once, are anticipated as further fields.
 
