@@ -11,6 +11,7 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -55,6 +56,7 @@ func TestAccess(t *testing.T) {
 	templates := filepath.Join("..", "..", "charts", "kupra", "templates")
 	apply(t, filepath.Join(templates, "access-clusterroles.yaml"))
 	apply(t, filepath.Join(templates, "created-by.yaml"))
+	apply(t, filepath.Join(templates, "snapshot-source.yaml"))
 	setUpPolicies(t)
 
 	createNamespace(t, "access", nil)
@@ -125,6 +127,28 @@ template:
 			}
 		}
 		return nil
+	})
+
+	t.Run("snapshots need the snapshot verb", func(t *testing.T) {
+		snapshot := func(user string) error {
+			s := &kuprav1alpha1.PreviewSnapshot{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "snap-", Namespace: "access"},
+				Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: preview.Name}}},
+			}
+			return as(t, user).Create(ctx, s, client.DryRunAll)
+		}
+		// The admission policy may take a moment to come into effect.
+		eventually(t, func() error {
+			if err := snapshot("carol"); !apierrors.IsForbidden(err) {
+				return fmt.Errorf("carol snapshotting alice's preview: %v, want forbidden", err)
+			}
+			return nil
+		})
+		for _, user := range []string{"alice", "bob"} {
+			if err := snapshot(user); err != nil {
+				t.Errorf("%s snapshotting alice's preview: %v", user, err)
+			}
+		}
 	})
 
 	t.Run("owners and admins added later", func(t *testing.T) {

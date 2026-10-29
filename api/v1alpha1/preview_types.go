@@ -26,6 +26,20 @@ type PreviewSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self.all(s, !has(s.apiGroup) || s.apiGroup == '' || (s.kind != 'ServiceAccount' && s.apiGroup == 'rbac.authorization.k8s.io'))",message="apiGroup must be rbac.authorization.k8s.io for users and groups, and empty for service accounts"
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners can't be system users or groups, such as system:authenticated"
 	Owners []rbacv1.Subject `json:"owners,omitempty"`
+
+	// RestoreFrom is the snapshot the preview's state starts from, when it starts or is reset. Without it, state starts empty.
+	// +optional
+	RestoreFrom *RestoreSource `json:"restoreFrom,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.snapshotRef) != has(self.snapshotSelector)",message="exactly one of snapshotRef and snapshotSelector must be set"
+type RestoreSource struct {
+	// SnapshotRef names a PreviewSnapshot in the preview's namespace.
+	// +optional
+	SnapshotRef *meta.LocalObjectReference `json:"snapshotRef,omitempty"`
+	// SnapshotSelector selects the newest ready PreviewSnapshot in the preview's namespace.
+	// +optional
+	SnapshotSelector *metav1.LabelSelector `json:"snapshotSelector,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Pending;Provisioning;Starting;Running;Stopping;Stopped;Terminating;Failed
@@ -54,6 +68,14 @@ type PreviewStatus struct {
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 
+	// RestoredFrom is the PreviewSnapshot the preview's state started from.
+	// +optional
+	RestoredFrom *meta.LocalObjectReference `json:"restoredFrom,omitempty"`
+
+	// LastHandledResetAt is the last handled value of the kupra.futo.tech/reset-requested-at annotation.
+	// +optional
+	LastHandledResetAt string `json:"lastHandledResetAt,omitempty"`
+
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -62,12 +84,23 @@ type PreviewStatus struct {
 	// Inventory lists the resources kupra applied for the preview.
 	// +optional
 	// +listType=atomic
-	Inventory []corev1.TypedLocalObjectReference `json:"inventory,omitempty"`
+	Inventory []InventoryEntry `json:"inventory,omitempty"`
 
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// InventoryEntry is a resource kupra applied for a preview.
+type InventoryEntry struct {
+	corev1.TypedLocalObjectReference `json:",inline"`
+	// State is set for state, which is kept when it's no longer rendered.
+	// +optional
+	State bool `json:"state,omitempty"`
+	// Retained is set for state that's no longer rendered, until the preview is reset.
+	// +optional
+	Retained bool `json:"retained,omitempty"`
 }
 
 type LinkStatus struct {

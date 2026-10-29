@@ -8,8 +8,17 @@ import (
 	"k8s.io/client-go/discovery/cached/memory"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/check"
+)
+
+const (
+	LabelApp              = "kupra.futo.tech/app"
+	LabelPreview          = "kupra.futo.tech/preview"
+	LabelPreviewNamespace = "kupra.futo.tech/preview-namespace"
+	AnnotationPreviewUID  = "kupra.futo.tech/preview-uid"
+
+	FieldManager = "kupra"
+	Finalizer    = "kupra.futo.tech/cleanup"
 )
 
 // Leader election:
@@ -52,13 +61,9 @@ func Setup(ctx context.Context, mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).For(&kuprav1alpha1.PreviewSnapshot{}).Complete(noopReconciler{})
-}
-
-// +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots,verbs=get;list;watch
-
-type noopReconciler struct{}
-
-func (noopReconciler) Reconcile(context.Context, ctrl.Request) (ctrl.Result, error) {
-	return ctrl.Result{}, nil
+	snapshots := &PreviewSnapshotReconciler{
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+	}
+	return snapshots.SetupWithManager(mgr)
 }

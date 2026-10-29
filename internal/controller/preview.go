@@ -33,8 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/policy"
 	"github.com/futo-org/kupra/internal/render"
+	"github.com/futo-org/kupra/internal/state"
 )
 
 const (
@@ -58,6 +60,8 @@ const (
 	// Readiness of applied resources is polled, since they can be of any kind.
 	startingInterval = 5 * time.Second
 	runningInterval  = 5 * time.Minute
+	// nextStepInterval is how soon a capture or reset takes its next step.
+	nextStepInterval = time.Second
 )
 
 // PreviewReconciler runs previews: their namespaces, the policy's settings there, and their rendered templates.
@@ -108,7 +112,11 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		result, err = r.reconcile(ctx, &preview)
 	}
-	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFrom(before)); patchErr != nil {
+	// The lock keeps a reconciliation that started from a stale read from writing stale status.
+	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
+		if apierrors.IsConflict(patchErr) && err == nil {
+			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+		}
 		return ctrl.Result{}, errors.Join(err, patchErr)
 	}
 	if cleanedUp {
@@ -120,8 +128,9 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
+	observedGeneration := p.Status.ObservedGeneration
 	p.Status.ObservedGeneration = p.Generation
-	nsName := previewNamespaceName(p.Namespace, p.Name)
+	nsName := names.PreviewNamespace(p.Namespace, p.Name)
 	p.Status.Namespace = nsName
 
 	namespaceExists, err := r.ensureAccess(ctx, p, nsName)
@@ -152,6 +161,27 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 			// Nothing kupra watches tells it when a conflicting namespace goes away, so check again later.
 			pending(p, reason, message)
 			return ctrl.Result{RequeueAfter: recheckInterval}, nil
+		}
+		// Captures, then resets, come before converging, as in ADR 10.
+		applier, err := r.impersonate(accountName)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			// Spec changes wait for the capture.
+			p.Status.ObservedGeneration = observedGeneration
+			return r.reconcileCapture(ctx, p, s, applier, nsName)
+		}
+		if resetRequested(p) {
+			return r.reconcileReset(ctx, p, applier, nsName)
+		}
+	} else if resetRequested(p) {
+		// Without a namespace, there's no app or state to remove.
+		if done, err := r.finishReset(ctx, p, nsName); err != nil || !done {
+			return ctrl.Result{RequeueAfter: startingInterval}, err
 		}
 	}
 
@@ -208,13 +238,65 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	applied, err := applyAll(ctx, applier, rendered.Objects)
-	var retained []corev1.TypedLocalObjectReference
+
+	// State goes first, so it's in place before anything uses it.
+	var states, workload []*unstructured.Unstructured
+	for _, obj := range rendered.Objects {
+		if _, ok := state.For(obj.GroupVersionKind().GroupKind()); ok && !obj.NotState {
+			states = append(states, obj.Unstructured)
+			continue
+		}
+		workload = append(workload, obj.Unstructured)
+	}
+	plan, reason, message, err := r.restoreState(ctx, p, applier, nsName, states)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	switch reason {
+	case "":
+	case ReasonSnapshotNotFound, ReasonSnapshotNotReady:
+		// PreviewSnapshots are watched, so this is retried when one changes.
+		pending(p, reason, message)
+		return ctrl.Result{}, nil
+	default:
+		failed(p, reason, message)
+		return ctrl.Result{}, nil
+	}
+
+	restored := plan.resources
+	applied, err := applyAll(ctx, applier, restored, true)
+	var restoreSettling bool
+	if err == nil {
+		restoreSettling, err = r.recordRestore(ctx, p, applier, plan)
+	}
+	if err == nil && !plan.done {
+		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
+		provisioning(p, "restoring state")
+		stallAfterTimeout(p, &app, "restoring state")
+		return ctrl.Result{RequeueAfter: startingInterval}, nil
+	}
+	if err == nil {
+		var ready bool
+		var message string
+		ready, message, err = readiness(ctx, applier, restored)
+		if err == nil && !ready {
+			p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
+			provisioning(p, message)
+			stallAfterTimeout(p, &app, message)
+			return ctrl.Result{RequeueAfter: startingInterval}, nil
+		}
+	}
+	if err == nil {
+		var appliedWorkload []kuprav1alpha1.InventoryEntry
+		appliedWorkload, err = applyAll(ctx, applier, workload, false)
+		applied = append(applied, appliedWorkload...)
+	}
+	var retained []kuprav1alpha1.InventoryEntry
 	if err == nil {
 		retained, err = r.prune(ctx, applier, nsName, p.Status.Inventory, applied)
 	}
 	if err != nil {
-		p.Status.Inventory = unionRefs(p.Status.Inventory, applied)
+		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
 		// An object the API server rejects as invalid stays invalid until the template or parameters change, and those changes requeue the preview.
 		if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
 			failed(p, ReasonApplyFailed, err.Error())
@@ -224,14 +306,22 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		stallAfterTimeout(p, &app, err.Error())
 		return ctrl.Result{}, err
 	}
-	p.Status.Inventory = unionRefs(applied, retained)
+	p.Status.Inventory = unionInventory(applied, retained)
 
-	ready, message, err := readiness(ctx, applier, rendered.Objects)
+	ready, message, err := readiness(ctx, applier, workload)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if ready {
 		running(p)
+		if started, err := r.startCapture(ctx, p); err != nil {
+			return ctrl.Result{}, err
+		} else if started {
+			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+		}
+		if restoreSettling {
+			return ctrl.Result{RequeueAfter: startingInterval}, nil
+		}
 		return ctrl.Result{RequeueAfter: runningInterval}, nil
 	}
 	starting(p, meta.ProgressingReason, message)
@@ -265,8 +355,16 @@ func (r *PreviewReconciler) confine(ctx context.Context, p *kuprav1alpha1.Previe
 // ensureNamespace creates or updates the preview's namespace. It returns a reason when the namespace can't be used yet.
 func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha1.Preview, name string, settings kuprav1alpha1.PreviewPolicySpec) (reason, message string, err error) {
 	var existing corev1.Namespace
-	switch err := r.Get(ctx, client.ObjectKey{Name: name}, &existing); {
-	case apierrors.IsNotFound(err):
+	err = r.Get(ctx, client.ObjectKey{Name: name}, &existing)
+	if apierrors.IsNotFound(err) {
+		// Create rather than apply, so a namespace that appeared since the read isn't taken over.
+		existing = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{AnnotationPreviewUID: string(p.UID)}}}
+		err = r.Create(ctx, &existing, client.FieldOwner(FieldManager))
+		if apierrors.IsAlreadyExists(err) {
+			err = r.APIReader.Get(ctx, client.ObjectKey{Name: name}, &existing)
+		}
+	}
+	switch {
 	case err != nil:
 		return "", "", err
 	case existing.Annotations[AnnotationPreviewUID] != string(p.UID):
@@ -286,7 +384,8 @@ func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha
 	labels[LabelPreviewNamespace] = p.Namespace
 	annotations[AnnotationPreviewUID] = string(p.UID)
 
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, Annotations: annotations}}
+	// The resourceVersion fails the apply if the namespace changed since its owner was checked.
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: existing.ResourceVersion, Labels: labels, Annotations: annotations}}
 	return "", "", r.applyObject(ctx, r.Client, ns)
 }
 
@@ -405,29 +504,31 @@ func (r *PreviewReconciler) applyObject(ctx context.Context, c client.Client, ob
 	return nil
 }
 
-func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) ([]corev1.TypedLocalObjectReference, error) {
-	var applied []corev1.TypedLocalObjectReference
+func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
+	var applied []kuprav1alpha1.InventoryEntry
 	var errs []error
 	for _, obj := range objs {
 		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
 			errs = append(errs, fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err))
 			continue
 		}
-		applied = append(applied, refOf(obj))
+		applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: refOf(obj), State: isState})
 	}
 	return applied, errors.Join(errs...)
 }
 
-// prune deletes resources that were applied before, but are no longer rendered. It keeps PersistentVolumeClaims, since they hold data the preview has built up, and returns them: they go with the preview's namespace.
-func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []corev1.TypedLocalObjectReference) ([]corev1.TypedLocalObjectReference, error) {
-	var retained []corev1.TypedLocalObjectReference
+// prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted.
+func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
+	var retained []kuprav1alpha1.InventoryEntry
 	var errs []error
-	for _, ref := range previous {
-		if slices.ContainsFunc(current, func(c corev1.TypedLocalObjectReference) bool { return sameObject(c, ref) }) {
+	for _, entry := range previous {
+		ref := entry.TypedLocalObjectReference
+		if slices.ContainsFunc(current, func(c kuprav1alpha1.InventoryEntry) bool { return sameObject(c.TypedLocalObjectReference, ref) }) {
 			continue
 		}
-		if isState(refGroup(ref), ref.Kind) {
-			retained = append(retained, ref)
+		if entry.State {
+			entry.Retained = true
+			retained = append(retained, entry)
 			continue
 		}
 		mapping, err := r.Mapper.RESTMapping(schema.GroupKind{Group: refGroup(ref), Kind: ref.Kind})
@@ -449,22 +550,26 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 	return retained, errors.Join(errs...)
 }
 
-// isState reports whether a kind of resource holds state, which kupra keeps when it drops out of a template. For now, that's only PersistentVolumeClaims.
-func isState(group, kind string) bool {
-	return group == "" && kind == "PersistentVolumeClaim"
-}
-
-// readiness judges the applied resources with kstatus, the way Flux does.
+// readiness judges applied resources by their kind's own rules if kupra supports it as state, and with kstatus otherwise, the way Flux does.
 func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) (bool, string, error) {
 	var waiting []string
 	for _, obj := range objs {
-		// A claim is ready once it exists: storage that binds volumes when a pod first uses them would otherwise never be ready.
-		if gvk := obj.GroupVersionKind(); gvk.Group == "" && gvk.Kind == "PersistentVolumeClaim" {
-			continue
-		}
 		live := &unstructured.Unstructured{}
 		live.SetGroupVersionKind(obj.GroupVersionKind())
-		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
+		err := c.Get(ctx, client.ObjectKeyFromObject(obj), live)
+		if client.IgnoreNotFound(err) != nil {
+			return false, "", err
+		}
+		if kind, ok := state.For(obj.GroupVersionKind().GroupKind()); ok {
+			if apierrors.IsNotFound(err) {
+				live = nil
+			}
+			if !kind.Ready(live) {
+				waiting = append(waiting, fmt.Sprintf("%s %s", obj.GetKind(), obj.GetName()))
+			}
+			continue
+		}
+		if err != nil {
 			return false, "", err
 		}
 		res, err := status.Compute(live)
@@ -483,7 +588,26 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 
 // reconcileDelete removes the preview's namespace and apply account. It reports whether cleanup is done, so the finalizer can go.
 func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, bool, error) {
-	nsName := previewNamespaceName(p.Namespace, p.Name)
+	nsName := names.PreviewNamespace(p.Namespace, p.Name)
+
+	// A started capture finishes first.
+	if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
+		if err != nil {
+			return ctrl.Result{}, false, err
+		}
+		applier, err := r.impersonate(nsName)
+		if err != nil {
+			return ctrl.Result{}, false, err
+		}
+		result, err := r.reconcileCapture(ctx, p, s, applier, nsName)
+		return result, false, err
+	}
+
+	if err := r.releaseSnapshots(ctx, p); err != nil {
+		return ctrl.Result{}, false, err
+	}
+
+	p.Status.ObservedGeneration = p.Generation
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonTerminating, "")
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
@@ -499,12 +623,16 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	case ns.Annotations[AnnotationPreviewUID] != string(p.UID):
 		gone = true
 	case ns.DeletionTimestamp.IsZero():
-		if err := client.IgnoreNotFound(r.Delete(ctx, &ns)); err != nil {
+		// The UID keeps a stale read from deleting a namespace that replaced the preview's.
+		if err := client.IgnoreNotFound(r.Delete(ctx, &ns, client.Preconditions{UID: &ns.UID})); err != nil {
 			return ctrl.Result{}, false, err
 		}
 	}
 	if !gone {
 		return ctrl.Result{RequeueAfter: startingInterval}, false, nil
+	}
+	if gone, err := r.removeRestoreCopies(ctx, p, nsName); err != nil || !gone {
+		return ctrl.Result{RequeueAfter: startingInterval}, false, err
 	}
 
 	// Another Preview's account can have the same name, when their namespace names collide.
@@ -531,6 +659,11 @@ func pending(p *kuprav1alpha1.Preview, reason, message string) {
 func failed(p *kuprav1alpha1.Preview, reason, message string) {
 	pending(p, reason, message)
 	p.Status.Phase = kuprav1alpha1.PreviewFailed
+}
+
+func provisioning(p *kuprav1alpha1.Preview, message string) {
+	starting(p, meta.ProgressingReason, message)
+	p.Status.Phase = kuprav1alpha1.PreviewProvisioning
 }
 
 func starting(p *kuprav1alpha1.Preview, reason, message string) {
@@ -566,21 +699,32 @@ func sameObject(a, b corev1.TypedLocalObjectReference) bool {
 	return refGroup(a) == refGroup(b) && a.Kind == b.Kind && a.Name == b.Name
 }
 
-func unionRefs(a, b []corev1.TypedLocalObjectReference) []corev1.TypedLocalObjectReference {
+// unionInventory adds to a the entries of b that it doesn't have.
+func unionInventory(a, b []kuprav1alpha1.InventoryEntry) []kuprav1alpha1.InventoryEntry {
 	out := slices.Clone(a)
-	for _, ref := range b {
-		if !slices.ContainsFunc(out, func(r corev1.TypedLocalObjectReference) bool { return sameObject(r, ref) }) {
-			out = append(out, ref)
+	for _, entry := range b {
+		if !slices.ContainsFunc(out, func(e kuprav1alpha1.InventoryEntry) bool {
+			return sameObject(e.TypedLocalObjectReference, entry.TypedLocalObjectReference)
+		}) {
+			out = append(out, entry)
 		}
 	}
 	return out
 }
 
-const appRefIndex = ".spec.appRef.name"
+const (
+	appRefIndex = ".spec.appRef.name"
+	sourceIndex = ".spec.source.previewRef.name"
+)
 
 func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &kuprav1alpha1.Preview{}, appRefIndex, func(obj client.Object) []string {
 		return []string{obj.(*kuprav1alpha1.Preview).Spec.AppRef.Name}
+	}); err != nil {
+		return err
+	}
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &kuprav1alpha1.PreviewSnapshot{}, sourceIndex, func(obj client.Object) []string {
+		return []string{obj.(*kuprav1alpha1.PreviewSnapshot).Spec.Source.PreviewRef.Name}
 	}); err != nil {
 		return err
 	}
@@ -593,6 +737,7 @@ func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		))).
 		Watches(&kuprav1alpha1.PreviewApp{}, handler.EnqueueRequestsFromMapFunc(r.previewsOfApp)).
 		Watches(&kuprav1alpha1.PreviewPolicy{}, handler.EnqueueRequestsFromMapFunc(r.allPreviews)).
+		Watches(&kuprav1alpha1.PreviewSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.previewsForSnapshot)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.previewsForNamespace)).
 		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.previewsForAdminBinding)).
 		Complete(r)
@@ -620,7 +765,7 @@ func (r *PreviewReconciler) previewsForNamespace(ctx context.Context, ns client.
 	}
 	var requests []reconcile.Request
 	for _, req := range r.previews(ctx, client.InNamespace(owner)) {
-		if previewNamespaceName(req.Namespace, req.Name) == ns.GetName() {
+		if names.PreviewNamespace(req.Namespace, req.Name) == ns.GetName() {
 			requests = append(requests, req)
 		}
 	}
@@ -636,6 +781,26 @@ func (r *PreviewReconciler) previews(ctx context.Context, opts ...client.ListOpt
 	requests := make([]reconcile.Request, len(previews.Items))
 	for i, p := range previews.Items {
 		requests[i] = reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)}
+	}
+	return requests
+}
+
+// previewsForSnapshot maps a PreviewSnapshot to the preview it captures, and to the previews in its namespace that restore from a snapshot.
+func (r *PreviewReconciler) previewsForSnapshot(ctx context.Context, obj client.Object) []reconcile.Request {
+	s, ok := obj.(*kuprav1alpha1.PreviewSnapshot)
+	if !ok {
+		return nil
+	}
+	var previews kuprav1alpha1.PreviewList
+	if err := r.List(ctx, &previews, client.InNamespace(s.Namespace)); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "listing Previews")
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, p := range previews.Items {
+		if p.Name == s.Spec.Source.PreviewRef.Name || p.Spec.RestoreFrom != nil {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)})
+		}
 	}
 	return requests
 }

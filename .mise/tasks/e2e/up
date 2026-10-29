@@ -33,6 +33,8 @@ k apply -f "$hostpath/examples/csi-storageclass.yaml"
 k annotate storageclass standard storageclass.kubernetes.io/is-default-class=false --overwrite
 k annotate storageclass csi-hostpath-sc storageclass.kubernetes.io/is-default-class=true --overwrite
 k rollout status statefulset/csi-hostpathplugin --timeout=180s
+# kupra snapshots claims with the default VolumeSnapshotClass of their driver.
+k annotate volumesnapshotclass csi-hostpath-snapclass snapshot.storage.kubernetes.io/is-default-class=true --overwrite
 
 k apply --server-side -f "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/${E2E_CNPG_VERSION}/cnpg-${E2E_CNPG_VERSION#v}.yaml"
 k -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s

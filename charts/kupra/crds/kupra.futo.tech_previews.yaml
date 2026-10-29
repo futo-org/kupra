@@ -123,6 +123,72 @@ spec:
                   Like environment variables, they're strings, whatever the parameter's
                   type.
                 type: object
+              restoreFrom:
+                description: RestoreFrom is the snapshot the preview's state starts
+                  from, when it starts or is reset. Without it, state starts empty.
+                properties:
+                  snapshotRef:
+                    description: SnapshotRef names a PreviewSnapshot in the preview's
+                      namespace.
+                    properties:
+                      name:
+                        description: Name of the referent.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  snapshotSelector:
+                    description: SnapshotSelector selects the newest ready PreviewSnapshot
+                      in the preview's namespace.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of snapshotRef and snapshotSelector must be
+                    set
+                  rule: has(self.snapshotRef) != has(self.snapshotSelector)
             required:
             - appRef
             type: object
@@ -190,9 +256,7 @@ spec:
               inventory:
                 description: Inventory lists the resources kupra applied for the preview.
                 items:
-                  description: |-
-                    TypedLocalObjectReference contains enough information to let you locate the
-                    typed referenced object inside the same namespace.
+                  description: InventoryEntry is a resource kupra applied for a preview.
                   properties:
                     apiGroup:
                       description: |-
@@ -206,6 +270,14 @@ spec:
                     name:
                       description: Name is the name of resource being referenced
                       type: string
+                    retained:
+                      description: Retained is set for state that's no longer rendered,
+                        until the preview is reset.
+                      type: boolean
+                    state:
+                      description: State is set for state, which is kept when it's
+                        no longer rendered.
+                      type: boolean
                   required:
                   - kind
                   - name
@@ -213,6 +285,10 @@ spec:
                   x-kubernetes-map-type: atomic
                 type: array
                 x-kubernetes-list-type: atomic
+              lastHandledResetAt:
+                description: LastHandledResetAt is the last handled value of the kupra.futo.tech/reset-requested-at
+                  annotation.
+                type: string
               links:
                 items:
                   properties:
@@ -248,6 +324,16 @@ spec:
                 - Terminating
                 - Failed
                 type: string
+              restoredFrom:
+                description: RestoredFrom is the PreviewSnapshot the preview's state
+                  started from.
+                properties:
+                  name:
+                    description: Name of the referent.
+                    type: string
+                required:
+                - name
+                type: object
             type: object
         required:
         - spec
