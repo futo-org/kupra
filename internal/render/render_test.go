@@ -438,6 +438,51 @@ func TestRenderEdgeCases(t *testing.T) {
 		return app.Render(preview, values(t, vals))
 	}
 
+	t.Run("state annotation", func(t *testing.T) {
+		result, err := render(t, `
+parameters:
+  - name: keep
+    title: Keep
+    type: boolean
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: default
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: cache
+        annotations:
+          kupra.futo.tech/state: parameters.keep
+`, `{keep: "false"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Objects[0].NotState || !result.Objects[1].NotState {
+			t.Errorf("NotState = %v, %v; want false, true", result.Objects[0].NotState, result.Objects[1].NotState)
+		}
+		if got := result.Objects[1].GetAnnotations()[StateAnnotation]; got != "parameters.keep" {
+			t.Errorf("state annotation = %q, want the expression kept", got)
+		}
+	})
+
+	t.Run("state annotation from an expression", func(t *testing.T) {
+		_, err := render(t, `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: cache
+        annotationsExpr: '{"kupra.futo.tech/state": "false"}'
+`, `{}`)
+		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/state can't be given by an expression") {
+			t.Errorf("error = %v, want the state annotation refused", err)
+		}
+	})
+
 	t.Run("required parameter with a default", func(t *testing.T) {
 		result, err := render(t, `
 parameters:

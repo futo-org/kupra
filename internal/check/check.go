@@ -10,12 +10,14 @@ import (
 	"github.com/google/cel-go/common/types"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apiserver/pkg/cel/openapi/resolver"
 	rbacvalidation "k8s.io/component-helpers/auth/rbac/validation"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 
 	"github.com/futo-org/kupra/internal/render"
+	"github.com/futo-org/kupra/internal/state"
 )
 
 // ApplyVerbs are what kupra needs on each kind of resource in a template: server-side apply creates and patches, and pruning deletes.
@@ -44,6 +46,10 @@ func (c *Checker) Template(app *render.App, roleName string, rules []rbacv1.Poli
 			errs = append(errs, field.Forbidden(r.Path.Child("kind"), fmt.Sprintf("%s is cluster-scoped, and templates can only contain namespaced resources", gvk.Kind)))
 			continue
 		}
+		if kind, ok := state.For(gvk.GroupKind()); ok && !optedOut(r.Object) {
+			errs = append(errs, kind.Check(r.Object, r.Path)...)
+		}
+
 		resource := mapping.Resource
 		if ok, missing := rbacvalidation.Covers(rules, []rbacv1.PolicyRule{{
 			APIGroups: []string{resource.Group},
@@ -228,4 +234,10 @@ func formatPath(path []any) string {
 		}
 	}
 	return b.String()
+}
+
+// optedOut reports whether a template resource is never handled as state. A state annotation that's an expression may still evaluate to true, so the resource has to pass the state checks.
+func optedOut(obj map[string]any) bool {
+	annotations, _, _ := unstructured.NestedStringMap(obj, "metadata", "annotations")
+	return annotations[render.StateAnnotation] == "false"
 }

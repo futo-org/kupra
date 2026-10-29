@@ -92,6 +92,18 @@ template:
           requests:
             storage: 1Gi
     - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: cache
+        annotations:
+          kupra.futo.tech/include: parameters.service
+          kupra.futo.tech/state: "false"
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+    - apiVersion: v1
       kind: Service
       metadata:
         name: web
@@ -116,8 +128,8 @@ template:
 	if want := []kuprav1alpha1.LinkStatus{{Name: "Web", URL: "https://pr-1.example.com"}}; !slices.Equal(p.Status.Links, want) {
 		t.Errorf("links = %v, want %v", p.Status.Links, want)
 	}
-	if len(p.Status.Inventory) != 3 {
-		t.Errorf("inventory = %v, want the ConfigMap, the claim and the Service", p.Status.Inventory)
+	if len(p.Status.Inventory) != 4 {
+		t.Errorf("inventory = %v, want the ConfigMap, both claims and the Service", p.Status.Inventory)
 	}
 
 	var ns corev1.Namespace
@@ -193,8 +205,18 @@ template:
 			return nil
 		})
 		p = waitForPhase(t, "previews", "pr-1", kuprav1alpha1.PreviewRunning, "Succeeded")
-		if len(p.Status.Inventory) != 2 {
-			t.Errorf("inventory = %v, want the ConfigMap and the claim, which is kept", p.Status.Inventory)
+		var retained []string
+		for _, e := range p.Status.Inventory {
+			if e.Retained {
+				retained = append(retained, e.Name)
+			}
+		}
+		if len(p.Status.Inventory) != 2 || !slices.Equal(retained, []string{"data"}) {
+			t.Errorf("inventory = %+v, want the ConfigMap and the claim data, which is kept as state", p.Status.Inventory)
+		}
+		var cache corev1.PersistentVolumeClaim
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "cache"}, &cache); !apierrors.IsNotFound(err) && cache.DeletionTimestamp.IsZero() {
+			t.Errorf("claim cache: %v; want it deleted, since it isn't state", err)
 		}
 		var pvc corev1.PersistentVolumeClaim
 		if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "data"}, &pvc); err != nil || !pvc.DeletionTimestamp.IsZero() {

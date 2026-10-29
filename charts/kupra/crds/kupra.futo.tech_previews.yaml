@@ -190,9 +190,7 @@ spec:
               inventory:
                 description: Inventory lists the resources kupra applied for the preview.
                 items:
-                  description: |-
-                    TypedLocalObjectReference contains enough information to let you locate the
-                    typed referenced object inside the same namespace.
+                  description: InventoryEntry is a resource kupra applied for a preview.
                   properties:
                     apiGroup:
                       description: |-
@@ -206,6 +204,14 @@ spec:
                     name:
                       description: Name is the name of resource being referenced
                       type: string
+                    retained:
+                      description: Retained is set for state that's no longer rendered,
+                        which kupra keeps until the preview is reset or deleted.
+                      type: boolean
+                    state:
+                      description: State is set for resources kupra handles as state.
+                        It keeps them when they're no longer rendered.
+                      type: boolean
                   required:
                   - kind
                   - name
