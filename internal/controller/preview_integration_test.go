@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
-	"github.com/futo-org/kupra/internal/controller"
+	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/policy"
 )
 
@@ -314,7 +314,7 @@ template:
 	})
 
 	t.Run("namespace conflict", func(t *testing.T) {
-		conflict := controller.PreviewNamespaceName("previews", "taken")
+		conflict := names.PreviewNamespace("previews", "taken")
 		createNamespace(t, conflict, nil)
 		taken := &kuprav1alpha1.Preview{
 			ObjectMeta: metav1.ObjectMeta{Name: "taken", Namespace: "previews", Labels: map[string]string{"example.com/pull-request": "2"}},

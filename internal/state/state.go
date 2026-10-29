@@ -7,7 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/futo-org/kupra/internal/names"
@@ -69,7 +68,7 @@ type RestoreRequest struct {
 	// From is the capture to restore from, or nil to start empty.
 	From *Source
 	// Names names the objects the kind creates.
-	Names Names
+	Names names.Resource
 	// Labels go on every object the kind creates, so they can be found and cleaned up.
 	Labels   map[string]string
 	Observed Observed
@@ -89,7 +88,7 @@ type CaptureRequest struct {
 	// Namespace is the PreviewSnapshot's namespace, where captured data is moved to.
 	Namespace string
 	// Names names the objects the kind creates.
-	Names Names
+	Names names.Resource
 	// Labels go on every object the kind creates, so they can be found and cleaned up.
 	Labels   map[string]string
 	Observed Observed
@@ -100,14 +99,6 @@ type Capture struct {
 	Data []corev1.TypedLocalObjectReference
 }
 
-// Names derives names for the objects a kind creates for one state resource. Different resources, previews and snapshots get different names.
-type Names interface {
-	// Name returns a name for a namespaced object, unique within the resource's work, made from a short purpose such as "capture".
-	Name(purpose string) string
-	// ClusterName returns a name for a cluster-scoped object, unique in the cluster.
-	ClusterName(purpose string) string
-}
-
 var kinds = map[schema.GroupKind]Kind{
 	{Kind: "PersistentVolumeClaim"}: persistentVolumeClaim{},
 }
@@ -116,21 +107,4 @@ var kinds = map[schema.GroupKind]Kind{
 func For(gk schema.GroupKind) (Kind, bool) {
 	k, ok := kinds[gk]
 	return k, ok
-}
-
-// NewNames returns the Names for a state resource's work on behalf of an owner, such as a PreviewSnapshot capturing it.
-func NewNames(owner string, ownerUID types.UID, gk schema.GroupKind, resource string) Names {
-	return resourceNames{owner: owner, key: string(ownerUID) + "/" + gk.String() + "/" + resource, resource: resource}
-}
-
-type resourceNames struct {
-	owner, key, resource string
-}
-
-func (n resourceNames) Name(purpose string) string {
-	return names.Hashed(n.owner+"-"+n.resource+"-"+purpose, n.key+"/"+purpose)
-}
-
-func (n resourceNames) ClusterName(purpose string) string {
-	return names.Hashed("kupra-"+n.owner+"-"+n.resource+"-"+purpose, n.key+"/"+purpose)
 }

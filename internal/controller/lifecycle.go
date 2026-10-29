@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/state"
 )
 
@@ -143,7 +144,7 @@ func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alph
 		req := state.CaptureRequest{
 			Resource:  live,
 			Namespace: s.Namespace,
-			Names:     state.NewNames(s.Name, s.UID, gk, entry.Name),
+			Names:     names.ForResource(s.Name, s.UID, gk, entry.Name),
 			Labels:    map[string]string{LabelSnapshotUID: string(s.UID)},
 		}
 		resp, err := r.runKind(ctx, func(observed state.Observed) state.Response {
@@ -451,7 +452,7 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		req := state.RestoreRequest{
 			Resource: obj,
 			Live:     live,
-			Names:    state.NewNames(p.Name, p.UID, gk, obj.GetName()),
+			Names:    names.ForResource(p.Name, p.UID, gk, obj.GetName()),
 			Labels:   map[string]string{LabelPreviewUID: string(p.UID)},
 		}
 		if live == nil && snapshot != nil {

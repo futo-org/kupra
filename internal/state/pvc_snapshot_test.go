@@ -8,6 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
+
+	"github.com/futo-org/kupra/internal/names"
 )
 
 func object(t *testing.T, doc string) *unstructured.Unstructured {
@@ -81,7 +83,7 @@ func TestPersistentVolumeClaimCapture(t *testing.T) {
 	req := CaptureRequest{
 		Resource:  object(t, claim),
 		Namespace: "app",
-		Names:     NewNames("snap", "uid", claimGK, "data"),
+		Names:     names.ForResource("snap", "uid", claimGK, "data"),
 		Labels:    map[string]string{"kupra.futo.tech/snapshot-uid": "uid"},
 	}
 	run := func() Response {
@@ -174,16 +176,16 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 
 func TestPersistentVolumeClaimCaptureFails(t *testing.T) {
 	kind, _ := For(claimGK)
-	names := NewNames("snap", "uid", claimGK, "data")
-	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "preview", Name: names.Name("capture")}
-	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: names.Name("data")}
+	n := names.ForResource("snap", "uid", claimGK, "data")
+	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "preview", Name: n.Name("capture")}
+	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: n.Name("data")}
 	failed := object(t, `
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata: {name: x, namespace: preview}
 status: {error: {message: no snapshot class}}
 `)
-	resp := kind.Capture(CaptureRequest{Resource: object(t, claim), Namespace: "app", Names: names, Observed: Observed{source: failed, target: nil}})
+	resp := kind.Capture(CaptureRequest{Resource: object(t, claim), Namespace: "app", Names: n, Observed: Observed{source: failed, target: nil}})
 	if !strings.Contains(resp.Failed, "no snapshot class") {
 		t.Errorf("failure = %q, want the VolumeSnapshot's error", resp.Failed)
 	}
@@ -214,7 +216,7 @@ status: {snapshotHandle: handle-2, readyToUse: true}
 	req := RestoreRequest{
 		Resource: object(t, claim),
 		From:     &Source{Namespace: "app", Data: []corev1.TypedLocalObjectReference{{APIGroup: &group, Kind: "VolumeSnapshot", Name: "captured"}}},
-		Names:    NewNames("pr-1", "uid", claimGK, "data"),
+		Names:    names.ForResource("pr-1", "uid", claimGK, "data"),
 		Labels:   map[string]string{"kupra.futo.tech/preview-uid": "uid"},
 	}
 	var resp Response
@@ -277,7 +279,7 @@ func TestPersistentVolumeClaimRestoreFromMissingSnapshot(t *testing.T) {
 	resp := kind.Restore(RestoreRequest{
 		Resource: object(t, claim),
 		From:     &Source{Namespace: "app", Data: []corev1.TypedLocalObjectReference{{APIGroup: &group, Kind: "VolumeSnapshot", Name: "captured"}}},
-		Names:    NewNames("pr-1", "uid", claimGK, "data"),
+		Names:    names.ForResource("pr-1", "uid", claimGK, "data"),
 		Observed: Observed{captured: nil},
 	})
 	if !strings.Contains(resp.Failed, "doesn't exist") {
@@ -288,9 +290,9 @@ func TestPersistentVolumeClaimRestoreFromMissingSnapshot(t *testing.T) {
 // A VolumeSnapshotClass can already retain what it snapshots. The source's content is still labelled, so it can be cleaned up with the PreviewSnapshot.
 func TestPersistentVolumeClaimCaptureWithRetainClass(t *testing.T) {
 	kind, _ := For(claimGK)
-	names := NewNames("snap", "uid", claimGK, "data")
-	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "preview", Name: names.Name("capture")}
-	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: names.Name("data")}
+	n := names.ForResource("snap", "uid", claimGK, "data")
+	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "preview", Name: n.Name("capture")}
+	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: n.Name("data")}
 	contentRef := Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: "content-1"}
 	c := cluster{
 		source: object(t, `
@@ -314,7 +316,7 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 	req := CaptureRequest{
 		Resource:  object(t, claim),
 		Namespace: "app",
-		Names:     names,
+		Names:     n,
 		Labels:    map[string]string{"kupra.futo.tech/snapshot-uid": "uid"},
 		Observed:  Observed{source: c[source], target: nil, contentRef: c[contentRef]},
 	}

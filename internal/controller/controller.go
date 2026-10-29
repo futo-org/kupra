@@ -11,6 +11,16 @@ import (
 	"github.com/futo-org/kupra/internal/check"
 )
 
+const (
+	LabelApp              = "kupra.futo.tech/app"
+	LabelPreview          = "kupra.futo.tech/preview"
+	LabelPreviewNamespace = "kupra.futo.tech/preview-namespace"
+	AnnotationPreviewUID  = "kupra.futo.tech/preview-uid"
+
+	FieldManager = "kupra"
+	Finalizer    = "kupra.futo.tech/cleanup"
+)
+
 // Leader election:
 // +kubebuilder:rbac:groups=coordination.k8s.io,namespace=kupra-system,resources=leases,verbs=get;create;update
 // +kubebuilder:rbac:groups="",namespace=kupra-system,resources=events,verbs=create;patch

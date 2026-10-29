@@ -17,6 +17,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/controller"
+	"github.com/futo-org/kupra/internal/names"
 )
 
 // staleReconciler is a PreviewReconciler whose reads of a namespace return what's given, the way a cache that hasn't caught up would.
@@ -103,7 +104,7 @@ func TestNamespaceReplacedSinceRead(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := stalePreview("replaced-"+tc.name, "mine")
-			name := controller.PreviewNamespaceName(p.Namespace, p.Name)
+			name := names.PreviewNamespace(p.Namespace, p.Name)
 			// A namespace the preview once had, which has since been replaced by another one of the same name.
 			stale := createOwnedNamespace(t, name, "mine")
 			replaceNamespace(t, name, "other")
@@ -152,7 +153,7 @@ func TestAccessToReplacedNamespace(t *testing.T) {
 	createNamespace(t, "stale", nil)
 	p := stalePreview("replaced-access", "mine")
 	p.Annotations = map[string]string{controller.AnnotationCreatedBy: "alice"}
-	name := controller.PreviewNamespaceName(p.Namespace, p.Name)
+	name := names.PreviewNamespace(p.Namespace, p.Name)
 	stale := createOwnedNamespace(t, name, "mine")
 	replaceNamespace(t, name, "other")
 

@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/policy"
 	"github.com/futo-org/kupra/internal/render"
 	"github.com/futo-org/kupra/internal/state"
@@ -129,7 +130,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
 	observedGeneration := p.Status.ObservedGeneration
 	p.Status.ObservedGeneration = p.Generation
-	nsName := previewNamespaceName(p.Namespace, p.Name)
+	nsName := names.PreviewNamespace(p.Namespace, p.Name)
 	p.Status.Namespace = nsName
 
 	namespaceExists, err := r.ensureAccess(ctx, p, nsName)
@@ -585,7 +586,7 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 
 // reconcileDelete removes the preview's namespace and apply account. It reports whether cleanup is done, so the finalizer can go.
 func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, bool, error) {
-	nsName := previewNamespaceName(p.Namespace, p.Name)
+	nsName := names.PreviewNamespace(p.Namespace, p.Name)
 
 	// A capture that has started finishes first.
 	if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
@@ -762,7 +763,7 @@ func (r *PreviewReconciler) previewsForNamespace(ctx context.Context, ns client.
 	}
 	var requests []reconcile.Request
 	for _, req := range r.previews(ctx, client.InNamespace(owner)) {
-		if previewNamespaceName(req.Namespace, req.Name) == ns.GetName() {
+		if names.PreviewNamespace(req.Namespace, req.Name) == ns.GetName() {
 			requests = append(requests, req)
 		}
 	}
