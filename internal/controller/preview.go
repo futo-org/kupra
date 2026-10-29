@@ -265,8 +265,16 @@ func (r *PreviewReconciler) confine(ctx context.Context, p *kuprav1alpha1.Previe
 // ensureNamespace creates or updates the preview's namespace. It returns a reason when the namespace can't be used yet.
 func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha1.Preview, name string, settings kuprav1alpha1.PreviewPolicySpec) (reason, message string, err error) {
 	var existing corev1.Namespace
-	switch err := r.Get(ctx, client.ObjectKey{Name: name}, &existing); {
-	case apierrors.IsNotFound(err):
+	err = r.Get(ctx, client.ObjectKey{Name: name}, &existing)
+	if apierrors.IsNotFound(err) {
+		// Create rather than apply, so a namespace that appeared since the read is checked instead of taken over.
+		existing = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{AnnotationPreviewUID: string(p.UID)}}}
+		err = r.Create(ctx, &existing, client.FieldOwner(FieldManager))
+		if apierrors.IsAlreadyExists(err) {
+			err = r.APIReader.Get(ctx, client.ObjectKey{Name: name}, &existing)
+		}
+	}
+	switch {
 	case err != nil:
 		return "", "", err
 	case existing.Annotations[AnnotationPreviewUID] != string(p.UID):
@@ -286,7 +294,8 @@ func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha
 	labels[LabelPreviewNamespace] = p.Namespace
 	annotations[AnnotationPreviewUID] = string(p.UID)
 
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, Annotations: annotations}}
+	// The resourceVersion makes the apply fail if the namespace changed since its owner was checked.
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: existing.ResourceVersion, Labels: labels, Annotations: annotations}}
 	return "", "", r.applyObject(ctx, r.Client, ns)
 }
 
@@ -499,7 +508,8 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	case ns.Annotations[AnnotationPreviewUID] != string(p.UID):
 		gone = true
 	case ns.DeletionTimestamp.IsZero():
-		if err := client.IgnoreNotFound(r.Delete(ctx, &ns)); err != nil {
+		// The UID keeps a stale read from deleting a namespace that replaced the preview's.
+		if err := client.IgnoreNotFound(r.Delete(ctx, &ns, client.Preconditions{UID: &ns.UID})); err != nil {
 			return ctrl.Result{}, false, err
 		}
 	}
