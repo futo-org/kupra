@@ -32,7 +32,7 @@ spec:
   resources: {requests: {storage: 1Gi}}
 `
 
-// cluster plays the API server and the snapshot controller for a kind: it applies and deletes what the kind asks for, and answers what it observes.
+// cluster plays the API server for a kind: it applies and deletes what the kind asks for, and answers what it reads.
 type cluster map[Ref]*unstructured.Unstructured
 
 func (c cluster) step(resp Response) Observed {
@@ -282,12 +282,12 @@ func TestPersistentVolumeClaimRestoreFromMissingSnapshot(t *testing.T) {
 		Names:    names.ForResource("pr-1", "uid", claimGK, "data"),
 		Observed: Observed{captured: nil},
 	})
-	if !strings.Contains(resp.Failed, "doesn't exist") {
+	if !strings.Contains(resp.Failed, "not found") {
 		t.Errorf("failure = %q, want the missing VolumeSnapshot reported", resp.Failed)
 	}
 }
 
-// A VolumeSnapshotClass can already retain what it snapshots. The source's content is still labelled, so it can be cleaned up with the PreviewSnapshot.
+// A source content that's already retained is still labelled.
 func TestPersistentVolumeClaimCaptureWithRetainClass(t *testing.T) {
 	kind, _ := For(claimGK)
 	n := names.ForResource("snap", "uid", claimGK, "data")

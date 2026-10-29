@@ -20,7 +20,7 @@ import (
 	"github.com/futo-org/kupra/internal/names"
 )
 
-// staleReconciler is a PreviewReconciler whose reads of a namespace return what's given, the way a cache that hasn't caught up would.
+// staleReconciler is a PreviewReconciler whose cached reads of a namespace return stale.
 func staleReconciler(t *testing.T, name string, stale *corev1.Namespace) *controller.PreviewReconciler {
 	t.Helper()
 	c, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})

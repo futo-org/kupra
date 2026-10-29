@@ -19,7 +19,7 @@ import (
 	"github.com/futo-org/kupra/internal/controller"
 )
 
-// stateAppSpec writes its value parameter to a claim the first time it starts, and is only ready while the claim holds the expected value. A preview restored from a snapshot is therefore only ready if the data really came across.
+// stateAppSpec writes its value parameter to an empty claim, and is ready while the claim holds its expect parameter.
 const stateAppSpec = `
 parameters:
   - name: value
@@ -137,7 +137,7 @@ func TestState(t *testing.T) {
 	// The source comes back after an Offline capture.
 	running("source")
 
-	// The restored preview would write "second" to an empty claim, so it's only ready if it got "first" from the snapshot.
+	// The restored preview is only ready if its claim holds "first", from the snapshot.
 	restored := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "restored", Namespace: ns.Name},
 		Spec: kuprav1alpha1.PreviewSpec{

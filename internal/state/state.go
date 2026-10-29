@@ -1,6 +1,6 @@
-// Package state is kupra's support for kinds of state: resources whose data kupra restores and captures.
+// Package state supports kinds of state: resources whose data kupra restores and captures.
 //
-// Each kind is written as pure functions. Given a state resource and the objects it asked to observe, a kind returns the objects it wants to exist, the ones it wants gone, the ones to observe next, and whether it's done. The controllers apply that and call it again, so progress lives in cluster objects rather than in memory.
+// A kind is pure functions. Like a Crossplane composition function, it returns the objects it wants and the objects it needs to read, and the controller calls it again with those until it has nothing new to read.
 package state
 
 import (
@@ -14,15 +14,15 @@ import (
 
 // Kind is support for one kind of state.
 type Kind interface {
-	// Check finds problems with a template resource as written, with its expressions, before any preview uses it.
+	// Check validates a template resource, with its expressions.
 	Check(resource map[string]any, fldPath *field.Path) field.ErrorList
-	// Restore works out how a state resource starts, empty or from a capture.
+	// Restore returns how a state resource starts, empty or from a capture.
 	Restore(RestoreRequest) Response
-	// Ready reports whether the live resource is ready for the rest of the preview to use.
+	// Ready reports whether the rest of the preview can use a live resource.
 	Ready(live *unstructured.Unstructured) bool
-	// Restored reports whether a live resource restored from a capture has taken in its data, so the capture can go.
+	// Restored reports whether a live resource no longer needs the capture it was restored from.
 	Restored(live *unstructured.Unstructured) bool
-	// Capture works out how to capture a state resource into a snapshot.
+	// Capture returns how to capture a state resource.
 	Capture(CaptureRequest) Response
 }
 
@@ -38,63 +38,59 @@ func RefOf(obj *unstructured.Unstructured) Ref {
 	return Ref{GroupVersionKind: obj.GroupVersionKind(), Namespace: obj.GetNamespace(), Name: obj.GetName()}
 }
 
-// Observed holds the live objects a kind asked to observe. Objects that don't exist are missing.
+// Observed holds the objects a kind asked to read, or nil for those that don't exist.
 type Observed map[Ref]*unstructured.Unstructured
 
 // Response is what a kind wants done.
 type Response struct {
-	// Resource is the state resource to apply, when restoring. It's applied as the preview's template account.
+	// Resource is the state resource to apply, as the preview's template account.
 	Resource *unstructured.Unstructured
-	// Apply are objects kupra applies with its own permissions, before the resource.
+	// Apply are objects to apply as kupra, before Resource.
 	Apply []*unstructured.Unstructured
-	// Delete are objects kupra deletes with its own permissions.
+	// Delete are objects to delete as kupra.
 	Delete []Ref
-	// Observe are objects to read and pass back in the next request.
+	// Observe are objects to read for the next call.
 	Observe []Ref
-	// Done is set once restoring has set up everything the resource needs, or capturing has finished.
+	// Done is set when the restore or capture needs nothing more.
 	Done bool
-	// Capture is what a finished capture recorded.
+	// Capture is the result of a finished capture.
 	Capture *Capture
-	// Failed explains a failure that retrying won't fix.
+	// Failed is set when retrying won't help.
 	Failed string
 }
 
 // RestoreRequest asks how a state resource starts.
 type RestoreRequest struct {
-	// Resource is the rendered state resource.
+	// Resource is the rendered resource.
 	Resource *unstructured.Unstructured
-	// Live is the resource as it exists, if it does. A resource that exists has already been restored.
+	// Live is the resource as it exists, or nil.
 	Live *unstructured.Unstructured
 	// From is the capture to restore from, or nil to start empty.
-	From *Source
-	// Names names the objects the kind creates.
-	Names names.Resource
-	// Labels go on every object the kind creates, so they can be found and cleaned up.
+	From     *Source
+	Names    names.Resource
 	Labels   map[string]string
 	Observed Observed
 }
 
 // Source is a capture in a PreviewSnapshot.
 type Source struct {
-	// Namespace is the PreviewSnapshot's namespace, where its data is.
+	// Namespace is the PreviewSnapshot's namespace.
 	Namespace string
 	Data      []corev1.TypedLocalObjectReference
 }
 
 // CaptureRequest asks how to capture a state resource.
 type CaptureRequest struct {
-	// Resource is the state resource, as it exists in the preview's namespace.
+	// Resource is the live resource.
 	Resource *unstructured.Unstructured
-	// Namespace is the PreviewSnapshot's namespace, where captured data is moved to.
+	// Namespace is the PreviewSnapshot's namespace, where the capture is moved to.
 	Namespace string
-	// Names names the objects the kind creates.
-	Names names.Resource
-	// Labels go on every object the kind creates, so they can be found and cleaned up.
-	Labels   map[string]string
-	Observed Observed
+	Names     names.Resource
+	Labels    map[string]string
+	Observed  Observed
 }
 
-// Capture is what a capture recorded: the objects in the PreviewSnapshot's namespace that hold its data.
+// Capture lists the objects in the PreviewSnapshot's namespace that hold a capture's data.
 type Capture struct {
 	Data []corev1.TypedLocalObjectReference
 }
@@ -103,7 +99,7 @@ var kinds = map[schema.GroupKind]Kind{
 	{Kind: "PersistentVolumeClaim"}: persistentVolumeClaim{},
 }
 
-// For returns the support for a kind of resource, if kupra has any.
+// For returns the support for a kind, if there is any.
 func For(gk schema.GroupKind) (Kind, bool) {
 	k, ok := kinds[gk]
 	return k, ok

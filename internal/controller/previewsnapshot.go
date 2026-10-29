@@ -26,14 +26,14 @@ const (
 	ReasonPreviewDeleted  = "PreviewDeleted"
 	ReasonInUse           = "InUse"
 
-	// heldInterval is how often a snapshot whose deletion is held checks again.
+	// heldInterval is how often a held deletion is checked again.
 	heldInterval = 30 * time.Second
 )
 
-// PreviewSnapshotReconciler looks after PreviewSnapshots before they start and once they're deleted. Capturing is done by the PreviewReconciler, alongside everything else that happens to the source preview.
+// PreviewSnapshotReconciler handles PreviewSnapshots before their capture starts and once they're deleted. The PreviewReconciler captures them.
 type PreviewSnapshotReconciler struct {
 	client.Client
-	// APIReader lists the VolumeSnapshots and VolumeSnapshotContents a snapshot leaves behind, which kupra doesn't cache.
+	// APIReader reads objects kupra doesn't cache, and Previews when deciding on a deletion.
 	APIReader client.Reader
 }
 
@@ -64,19 +64,19 @@ func (r *PreviewSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	err := r.Get(ctx, client.ObjectKey{Namespace: s.Namespace, Name: s.Spec.Source.PreviewRef.Name}, &p)
 	switch {
 	case apierrors.IsNotFound(err):
-		waiting(&s, ReasonPreviewNotFound, fmt.Sprintf("Preview %s doesn't exist", s.Spec.Source.PreviewRef.Name))
+		waiting(&s, ReasonPreviewNotFound, fmt.Sprintf("Preview %s not found", s.Spec.Source.PreviewRef.Name))
 	case err != nil:
 		return ctrl.Result{}, err
 	case !p.DeletionTimestamp.IsZero():
 		now := metav1.Now()
 		s.Status.CompletionTime = &now
 		s.Status.Phase = kuprav1alpha1.PreviewSnapshotFailed
-		message := fmt.Sprintf("Preview %s was deleted before it could be captured", p.Name)
+		message := fmt.Sprintf("Preview %s was deleted before its capture started", p.Name)
 		setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonPreviewDeleted, message)
 		setCondition(&s.Status.Conditions, s.Generation, meta.StalledCondition, metav1.ConditionTrue, ReasonPreviewDeleted, message)
 		apimeta.RemoveStatusCondition(&s.Status.Conditions, meta.ReconcilingCondition)
 	default:
-		waiting(&s, ReasonWaiting, fmt.Sprintf("waiting for Preview %s to be running, with no other capture or reset of it in progress", p.Name))
+		waiting(&s, ReasonWaiting, fmt.Sprintf("waiting for Preview %s", p.Name))
 	}
 	if err := r.Status().Patch(ctx, &s, patch); err != nil && !apierrors.IsConflict(err) {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -90,7 +90,7 @@ func waiting(s *kuprav1alpha1.PreviewSnapshot, reason, message string) {
 	setCondition(&s.Status.Conditions, s.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, reason, message)
 }
 
-// reconcileDelete holds a snapshot while it's in use, and then removes the data it holds.
+// reconcileDelete holds a snapshot while it's in use, then removes its data.
 func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kuprav1alpha1.PreviewSnapshot) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(s, Finalizer) {
 		return ctrl.Result{}, nil
@@ -110,7 +110,7 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 		return ctrl.Result{RequeueAfter: heldInterval}, nil
 	}
 
-	// Its own VolumeSnapshots go with it through their owner references, and the VolumeSnapshotContents they're bound to delete the storage snapshots. What's left is anything a capture left behind, such as contents kept from its source.
+	// Its own VolumeSnapshots are garbage collected. This removes what its captures left behind.
 	selector := client.MatchingLabels{LabelSnapshotUID: string(s.UID)}
 	var snapshots snapshotv1.VolumeSnapshotList
 	if err := r.APIReader.List(ctx, &snapshots, selector); err != nil && !apimeta.IsNoMatchError(err) {
@@ -126,7 +126,7 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 		return ctrl.Result{}, err
 	}
 	for i := range contents.Items {
-		// Contents still bound to a VolumeSnapshot go once it does.
+		// Bound contents go with their VolumeSnapshot.
 		if contents.Items[i].Spec.DeletionPolicy == snapshotv1.VolumeSnapshotContentDelete {
 			continue
 		}
@@ -140,11 +140,11 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 	return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, s, patch))
 }
 
-// holders lists what keeps a snapshot from being deleted: a capture of it that's running, previews that name it, and previews restoring from it, which hold it with finalizers of their own. Previews are read live, so a deletion doesn't go ahead on a stale view. Restore finalizers whose preview no longer exists are removed.
+// holders lists what holds a snapshot: its running capture, Previews that name it, and Previews restoring from it. It removes restore finalizers of Previews that are gone.
 func (r *PreviewSnapshotReconciler) holders(ctx context.Context, s *kuprav1alpha1.PreviewSnapshot) ([]string, error) {
 	var holders []string
 	if s.Status.StartTime != nil && s.Status.CompletionTime == nil {
-		holders = append(holders, "its capture, which is running")
+		holders = append(holders, "its capture")
 	}
 	var previews kuprav1alpha1.PreviewList
 	if err := r.APIReader.List(ctx, &previews, client.InNamespace(s.Namespace)); err != nil {
@@ -191,7 +191,7 @@ func (r *PreviewSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// snapshotsForPreview maps a Preview to the snapshots in its namespace, which may be waiting for it or held by it.
+// snapshotsForPreview maps a Preview to the snapshots that capture it, and those being deleted.
 func (r *PreviewSnapshotReconciler) snapshotsForPreview(ctx context.Context, p client.Object) []reconcile.Request {
 	var snapshots kuprav1alpha1.PreviewSnapshotList
 	if err := r.List(ctx, &snapshots, client.InNamespace(p.GetNamespace())); err != nil {

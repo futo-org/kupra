@@ -55,9 +55,8 @@ spec:
             properties:
               mode:
                 default: Offline
-                description: Mode chooses how the snapshot is kept consistent. Offline
-                  stops the preview's app while its state is captured. Online captures
-                  while it runs, so captures may not line up with each other.
+                description: 'Mode is how the snapshot is kept consistent: Offline
+                  stops the preview''s app while capturing, and Online doesn''t.'
                 enum:
                 - Offline
                 - Online
@@ -98,14 +97,13 @@ spec:
                 - name
                 type: object
               captures:
-                description: Captures are the state resources captured, matched by
-                  name and kind when restoring.
+                description: Captures are the captured state resources.
                 items:
                   description: Capture is a captured state resource.
                   properties:
                     data:
                       description: Data are the objects in the snapshot's namespace
-                        that hold the captured data, such as VolumeSnapshots.
+                        that hold the capture, such as VolumeSnapshots.
                       items:
                         description: |-
                           TypedLocalObjectReference contains enough information to let you locate the
@@ -144,7 +142,7 @@ spec:
                 type: array
                 x-kubernetes-list-type: atomic
               completionTime:
-                description: CompletionTime is when capturing succeeded or failed.
+                description: CompletionTime is when the capture succeeded or failed.
                 format: date-time
                 type: string
               conditions:
@@ -212,8 +210,7 @@ spec:
               parameters:
                 additionalProperties:
                   type: string
-                description: Parameters are the source preview's parameters when it
-                  was captured.
+                description: Parameters are the source preview's parameters when captured.
                 type: object
               phase:
                 description: Phase summarises the state for display. Tools should
@@ -227,7 +224,7 @@ spec:
               readyToUse:
                 type: boolean
               startTime:
-                description: StartTime is when kupra started capturing.
+                description: StartTime is when the capture started.
                 format: date-time
                 type: string
             type: object

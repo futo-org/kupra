@@ -61,7 +61,7 @@ func (r *PreviewReconciler) ensureAccess(ctx context.Context, p *kuprav1alpha1.P
 	}
 
 	var ns corev1.Namespace
-	// Read live, since a stale namespace would let the owners into one that replaced it.
+	// Read live, so the owners aren't let into a namespace that replaced the preview's.
 	switch err := r.APIReader.Get(ctx, client.ObjectKey{Name: namespace}, &ns); {
 	case apierrors.IsNotFound(err):
 		return false, nil

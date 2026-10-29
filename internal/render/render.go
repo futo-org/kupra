@@ -22,7 +22,7 @@ import (
 const (
 	// IncludeAnnotation decides whether a template resource is rendered.
 	IncludeAnnotation = "kupra.futo.tech/include"
-	// StateAnnotation decides whether a resource of a kind kupra supports is handled as state.
+	// StateAnnotation decides whether a resource of a supported kind is state.
 	StateAnnotation = "kupra.futo.tech/state"
 )
 
@@ -92,7 +92,7 @@ type Preview struct {
 // Object is a rendered resource.
 type Object struct {
 	*unstructured.Unstructured
-	// NotState is set when the state annotation opts the resource out of being handled as state.
+	// NotState is set when the state annotation is false.
 	NotState bool
 }
 

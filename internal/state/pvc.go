@@ -19,22 +19,19 @@ var (
 	volumeSnapshotContentGVK = snapshotv1.SchemeGroupVersion.WithKind("VolumeSnapshotContent")
 )
 
-// persistentVolumeClaim supports plain PersistentVolumeClaims, through the VolumeSnapshot API.
-//
-// A capture is a VolumeSnapshot of the claim, which is then moved next to the PreviewSnapshot: the storage snapshot is bound to a new VolumeSnapshotContent and VolumeSnapshot there, which are the only ones set to delete it. Restoring binds the storage snapshot to another VolumeSnapshot in the preview's namespace, and makes the claim its data source.
+// persistentVolumeClaim supports PersistentVolumeClaims, through VolumeSnapshots.
 type persistentVolumeClaim struct{}
 
-// Check refuses claims that set their own data source, since kupra sets it to restore them.
 func (persistentVolumeClaim) Check(resource map[string]any, fldPath *field.Path) field.ErrorList {
 	spec, _ := resource["spec"].(map[string]any)
 	var errs field.ErrorList
 	for _, key := range []string{"dataSource", "dataSourceRef", "dataSourceExpr", "dataSourceRefExpr"} {
 		if _, ok := spec[key]; ok {
-			errs = append(errs, field.Forbidden(fldPath.Child("spec", key), "kupra sets the data source of claims it handles as state; opt the claim out of being state to set your own"))
+			errs = append(errs, field.Forbidden(fldPath.Child("spec", key), "may not be set on a claim that's state"))
 		}
 	}
 	if _, ok := resource["specExpr"]; ok {
-		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), "kupra sets parts of the spec of claims it handles as state, so it can't be given as an expression"))
+		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), "may not be set on a claim that's state"))
 	}
 	return errs
 }
@@ -47,7 +44,7 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 		return Response{Resource: req.Resource, Done: true}
 	}
 	if len(req.From.Data) != 1 || req.From.Data[0].Kind != volumeSnapshotGVK.Kind || ptr.Deref(req.From.Data[0].APIGroup, "") != volumeSnapshotGVK.Group {
-		return Response{Failed: fmt.Sprintf("the capture of %s holds %v, not one VolumeSnapshot", req.Resource.GetName(), req.From.Data)}
+		return Response{Failed: fmt.Sprintf("capture must be one VolumeSnapshot, not %v", req.From.Data)}
 	}
 
 	captured := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.From.Namespace, Name: req.From.Data[0].Name}
@@ -56,7 +53,7 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 		return Response{Observe: []Ref{captured}}
 	}
 	if vsObj == nil {
-		return Response{Failed: fmt.Sprintf("the captured VolumeSnapshot %s/%s doesn't exist", captured.Namespace, captured.Name)}
+		return Response{Failed: fmt.Sprintf("VolumeSnapshot %s/%s not found", captured.Namespace, captured.Name)}
 	}
 	var vs snapshotv1.VolumeSnapshot
 	if err := fromUnstructured(vsObj, &vs); err != nil {
@@ -88,7 +85,7 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 	if err := unstructured.SetNestedMap(claim.Object, ref, "spec", "dataSourceRef"); err != nil {
 		return Response{Failed: err.Error()}
 	}
-	// A claim restored from a snapshot can't be smaller than the snapshot.
+	// A claim can't be smaller than the snapshot it's restored from.
 	if vs.Status.RestoreSize != nil {
 		requested, _, _ := unstructured.NestedString(claim.Object, "spec", "resources", "requests", "storage")
 		if q, err := resource.ParseQuantity(requested); err != nil || q.Cmp(*vs.Status.RestoreSize) < 0 {
@@ -100,11 +97,18 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 	return Response{Resource: claim, Apply: copied, Done: true}
 }
 
-// Ready is true once the claim exists: storage that binds volumes when a pod first uses them would otherwise never be ready.
+// Ready is true once the claim exists, since storage that binds on first use doesn't bind before pods start.
 func (persistentVolumeClaim) Ready(live *unstructured.Unstructured) bool {
 	return live != nil
 }
 
+// Restored is true once the claim is bound, since its volume is only provisioned then.
+func (persistentVolumeClaim) Restored(live *unstructured.Unstructured) bool {
+	phase, _, _ := unstructured.NestedString(live.Object, "status", "phase")
+	return phase == string(corev1.ClaimBound)
+}
+
+// Capture takes a VolumeSnapshot of the claim, then moves it next to the PreviewSnapshot: it binds the storage snapshot to a VolumeSnapshotContent there, the only one that deletes it.
 func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.Resource.GetNamespace(), Name: req.Names.Name("capture")}
 	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.Namespace, Name: req.Names.Name("data")}
@@ -114,7 +118,6 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 		return Response{Observe: []Ref{source, target}}
 	}
 
-	// Once the capture has moved, only the copy next to the PreviewSnapshot remains.
 	if targetObj != nil {
 		var vs snapshotv1.VolumeSnapshot
 		if err := fromUnstructured(targetObj, &vs); err != nil {
@@ -160,9 +163,8 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	if err := fromUnstructured(contentObj, &content); err != nil {
 		return Response{Failed: err.Error()}
 	}
-	// The source's content has to keep the storage snapshot when the source is deleted, or the preview's namespace is. It's labelled whatever its policy was, since it's left behind and has to be found to be cleaned up.
+	// The source's content must outlive the preview's namespace, and be found again to be deleted with the PreviewSnapshot.
 	if content.Spec.DeletionPolicy != snapshotv1.VolumeSnapshotContentRetain || !hasLabels(content.Labels, req.Labels) {
-		// Only the deletion policy and the labels are kupra's to set.
 		u := &unstructured.Unstructured{Object: map[string]any{
 			"metadata": map[string]any{"name": content.Name, "labels": stringMap(req.Labels)},
 			"spec":     map[string]any{"deletionPolicy": string(snapshotv1.VolumeSnapshotContentRetain)},
@@ -210,7 +212,6 @@ func snapshotError(vs *snapshotv1.VolumeSnapshot) string {
 func toUnstructured(obj runtime.Object, gvk schema.GroupVersionKind) *unstructured.Unstructured {
 	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
-		// Converting a typed object only fails on types that can't be represented, which these never are.
 		panic(err)
 	}
 	u := &unstructured.Unstructured{Object: content}
@@ -221,7 +222,7 @@ func toUnstructured(obj runtime.Object, gvk schema.GroupVersionKind) *unstructur
 	return u
 }
 
-// dropNulls removes the nulls that converting typed objects leaves for unset fields without omitempty, which CRD schemas reject.
+// dropNulls removes the nulls left by fields without omitempty, which CRD schemas reject.
 func dropNulls(m map[string]any) {
 	for k, v := range m {
 		switch v := v.(type) {
@@ -245,7 +246,7 @@ func fromUnstructured(u *unstructured.Unstructured, obj any) error {
 	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, obj)
 }
 
-// keepRestored carries over what restoring set on a claim, since a claim's data source can't change and it can't shrink.
+// keepRestored keeps a live claim's data source and size, which can't change and can't shrink.
 func keepRestored(rendered, live *unstructured.Unstructured) *unstructured.Unstructured {
 	claim := rendered.DeepCopy()
 	if ref, ok, _ := unstructured.NestedMap(live.Object, "spec", "dataSourceRef"); ok {
@@ -264,7 +265,7 @@ func keepRestored(rendered, live *unstructured.Unstructured) *unstructured.Unstr
 	return claim
 }
 
-// snapshotHandle is the storage snapshot behind a content: in its spec when it was bound to an existing snapshot, and in its status once a new one was taken.
+// snapshotHandle is a content's storage snapshot: in its spec if it was bound to an existing one, otherwise in its status.
 func snapshotHandle(content *snapshotv1.VolumeSnapshotContent) *string {
 	if content.Spec.Source.SnapshotHandle != nil {
 		return content.Spec.Source.SnapshotHandle
@@ -273,12 +274,6 @@ func snapshotHandle(content *snapshotv1.VolumeSnapshotContent) *string {
 		return content.Status.SnapshotHandle
 	}
 	return nil
-}
-
-// Restored is true once the claim is bound, since the volume is only provisioned from the snapshot then.
-func (persistentVolumeClaim) Restored(live *unstructured.Unstructured) bool {
-	phase, _, _ := unstructured.NestedString(live.Object, "status", "phase")
-	return phase == string(corev1.ClaimBound)
 }
 
 func hasLabels(labels, want map[string]string) bool {

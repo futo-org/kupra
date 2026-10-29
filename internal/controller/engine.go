@@ -14,19 +14,19 @@ import (
 )
 
 const (
-	// LabelPreviewUID marks objects kupra creates outside a preview's namespace on its behalf, such as the VolumeSnapshotContents it restores from.
+	// LabelPreviewUID marks objects kupra creates for a preview outside its namespace.
 	LabelPreviewUID = "kupra.futo.tech/preview-uid"
 	// LabelSnapshotUID marks objects kupra creates for a PreviewSnapshot.
 	LabelSnapshotUID = "kupra.futo.tech/snapshot-uid"
 
-	// maxKindRounds bounds how often a kind is called in one reconciliation. Kinds ask to observe a few objects at a time, so a handful of rounds gets as far as the cluster allows.
+	// maxKindRounds bounds how often a kind is called in one reconciliation.
 	maxKindRounds = 8
 )
 
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;create;patch;delete
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;list;create;patch;delete
 
-// runKind calls a kind of state with what it asked to observe, and applies and deletes what it asks for, until it's done, fails, or has nothing new to go on. Objects in ownedNamespace get owner as their owner, so they go with it.
+// runKind calls a kind with the objects it asked to read, applying and deleting what it asks for, until it's done, fails, or asks for nothing new. This is how Crossplane calls composition functions that require extra resources. Objects in ownedNamespace get owner as their owner.
 func (r *PreviewReconciler) runKind(ctx context.Context, call func(state.Observed) state.Response, ownedNamespace string, owner *metav1.OwnerReference) (state.Response, error) {
 	observed := state.Observed{}
 	for range maxKindRounds {
@@ -79,7 +79,7 @@ func refObject(ref state.Ref) *unstructured.Unstructured {
 	return u
 }
 
-// sameObserved reports whether two observations saw the same objects, at the same versions.
+// sameObserved reports whether two observations saw the same versions of the same objects.
 func sameObserved(a, b state.Observed) bool {
 	return maps.EqualFunc(a, b, func(x, y *unstructured.Unstructured) bool {
 		if x == nil || y == nil {

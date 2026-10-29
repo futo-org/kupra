@@ -193,7 +193,7 @@ template:
 		`spec.template.resources[1].kind: Forbidden: the policy's ClusterRole kupra-preview-template doesn't allow get, create, patch, delete on configmaps`,
 		`spec.template.resources[2].kind: Forbidden: ClusterRole is cluster-scoped, and templates can only contain namespaced resources`,
 		`spec.template.resources[3].kind: Invalid value: "Widget": no matches for kind "Widget" in version "example.com/v1"`,
-		`spec.template.resources[4].spec.dataSourceRef: Forbidden: kupra sets the data source of claims it handles as state`,
+		`spec.template.resources[4].spec.dataSourceRef: Forbidden: may not be set on a claim that's state`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("errors = %q\nwant them to contain %q", got, want)

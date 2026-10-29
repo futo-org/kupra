@@ -236,7 +236,7 @@ func formatPath(path []any) string {
 	return b.String()
 }
 
-// optedOut reports whether a template resource is never handled as state. A state annotation that's an expression may still evaluate to true, so the resource has to pass the state checks.
+// optedOut reports whether a template resource is never state. An expression may still evaluate to true, so only "false" opts out of the checks.
 func optedOut(obj map[string]any) bool {
 	annotations, _, _ := unstructured.NestedStringMap(obj, "metadata", "annotations")
 	return annotations[render.StateAnnotation] == "false"

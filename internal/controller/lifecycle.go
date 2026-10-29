@@ -27,7 +27,7 @@ const (
 	// AnnotationResetRequestedAt requests a reset whenever it's set to a new value.
 	AnnotationResetRequestedAt = "kupra.futo.tech/reset-requested-at"
 
-	// ConditionRestored is true once a preview's state has started, empty or from its snapshot.
+	// ConditionRestored is true once a preview's state has started, empty or from a snapshot.
 	ConditionRestored = "Restored"
 
 	ReasonCapturing        = "Capturing"
@@ -42,7 +42,7 @@ const (
 // +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots/status,verbs=get;update;patch
 
-// snapshotsOf lists the PreviewSnapshots of a preview that haven't finished, oldest first. A snapshot that's being deleted is listed too, since a capture of it that has started has to finish.
+// snapshotsOf lists a preview's unfinished PreviewSnapshots, oldest first, including those being deleted, whose started captures still finish.
 func (r *PreviewReconciler) snapshotsOf(ctx context.Context, p *kuprav1alpha1.Preview) ([]kuprav1alpha1.PreviewSnapshot, error) {
 	var list kuprav1alpha1.PreviewSnapshotList
 	if err := r.List(ctx, &list, client.InNamespace(p.Namespace), client.MatchingFields{sourceIndex: p.Name}); err != nil {
@@ -77,7 +77,7 @@ func (r *PreviewReconciler) runningCapture(ctx context.Context, p *kuprav1alpha1
 	return nil, nil
 }
 
-// startCapture starts the oldest waiting capture of a running preview. It reports whether it started one.
+// startCapture starts the next capture of a running preview, and reports whether it did.
 func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.Preview) (bool, error) {
 	snapshots, err := r.snapshotsOf(ctx, p)
 	if err != nil {
@@ -87,7 +87,7 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	if s == nil {
 		return false, nil
 	}
-	// The optimistic lock fails this if the snapshot has changed since it was read, for example by its finalizer being removed for deletion.
+	// The lock fails this if the snapshot's finalizer was removed since it was read.
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	now := metav1.Now()
 	s.Status.StartTime = &now
@@ -99,7 +99,7 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	return true, client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
 
-// nextCapture returns the snapshot whose capture starts next: the oldest that isn't being deleted. It has to carry kupra's finalizer first, so that once its capture has started, deleting it waits for the capture to finish. Until it does, nothing starts, so captures keep their order.
+// nextCapture returns the oldest snapshot that isn't being deleted, once it has kupra's finalizer, so that deleting it waits for its capture.
 func nextCapture(snapshots []kuprav1alpha1.PreviewSnapshot) *kuprav1alpha1.PreviewSnapshot {
 	i := slices.IndexFunc(snapshots, func(s kuprav1alpha1.PreviewSnapshot) bool { return s.DeletionTimestamp.IsZero() })
 	if i < 0 || !controllerutil.ContainsFinalizer(&snapshots[i], Finalizer) {
@@ -108,7 +108,7 @@ func nextCapture(snapshots []kuprav1alpha1.PreviewSnapshot) *kuprav1alpha1.Previ
 	return &snapshots[i]
 }
 
-// reconcileCapture continues a running capture of a preview. Template changes are held back meanwhile, so the snapshot matches the parameters it records, and an Offline capture keeps the app stopped.
+// reconcileCapture continues a running capture, holding back template changes so the snapshot matches the parameters it records.
 func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alpha1.Preview, s *kuprav1alpha1.PreviewSnapshot, applier client.Client, namespace string) (ctrl.Result, error) {
 	if s.Spec.Mode != kuprav1alpha1.SnapshotOnline {
 		gone, err := r.remove(ctx, applier, namespace, workloadEntries(p.Status.Inventory))
@@ -116,7 +116,7 @@ func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alph
 			return ctrl.Result{}, err
 		}
 		if !gone {
-			stopping(p, ReasonCapturing, fmt.Sprintf("stopping the app for PreviewSnapshot %s", s.Name))
+			stopping(p, ReasonCapturing, fmt.Sprintf("stopping for PreviewSnapshot %s", s.Name))
 			return ctrl.Result{RequeueAfter: startingInterval}, nil
 		}
 		stopped(p, ReasonCapturing, fmt.Sprintf("stopped for PreviewSnapshot %s", s.Name))
@@ -166,11 +166,11 @@ func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alph
 	if len(waiting) > 0 {
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
 	}
-	// The app starts again on the next reconciliation, now that the capture has finished.
+	// The app starts again on the next reconciliation.
 	return ctrl.Result{RequeueAfter: nextStepInterval}, r.finishSnapshot(ctx, s, captures, "")
 }
 
-// finishSnapshot records a capture's result. An empty failure means it succeeded.
+// finishSnapshot records a capture's result, which succeeded if failure is empty.
 func (r *PreviewReconciler) finishSnapshot(ctx context.Context, s *kuprav1alpha1.PreviewSnapshot, captures []kuprav1alpha1.Capture, failure string) error {
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	now := metav1.Now()
@@ -190,17 +190,17 @@ func (r *PreviewReconciler) finishSnapshot(ctx context.Context, s *kuprav1alpha1
 	return client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
 
-// resetRequested reports whether a preview's reset annotation has a value kupra hasn't handled yet.
+// resetRequested reports whether a preview's reset annotation has an unhandled value.
 func resetRequested(p *kuprav1alpha1.Preview) bool {
 	requested := p.Annotations[AnnotationResetRequestedAt]
 	return requested != "" && requested != p.Status.LastHandledResetAt
 }
 
-// reconcileReset removes a preview's app, its state and the copies of snapshots it restored from, then records the reset as handled, so the preview starts again as if it had just been created.
+// reconcileReset removes a preview's app, state and restore copies, then records the reset as handled.
 func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, namespace string) (ctrl.Result, error) {
 	gone, err := r.remove(ctx, applier, namespace, workloadEntries(p.Status.Inventory))
 	if err == nil && gone {
-		// State goes once nothing uses it.
+		// State goes once its users have.
 		gone, err = r.remove(ctx, applier, namespace, stateEntries(p.Status.Inventory))
 	}
 	if err == nil && gone {
@@ -210,7 +210,7 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 		return ctrl.Result{}, err
 	}
 	if !gone {
-		stopping(p, ReasonResetting, "removing the app and its state")
+		stopping(p, ReasonResetting, "removing app and state")
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
 	}
 	if err := r.releaseSnapshots(ctx, p); err != nil {
@@ -224,7 +224,7 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 	return ctrl.Result{RequeueAfter: nextStepInterval}, nil
 }
 
-// removeRestoreCopies deletes the VolumeSnapshots and VolumeSnapshotContents kupra bound in order to restore a preview, and reports whether they're gone.
+// removeRestoreCopies deletes the VolumeSnapshots and VolumeSnapshotContents a preview was restored from, and reports whether they're gone.
 func (r *PreviewReconciler) removeRestoreCopies(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
 	selector := client.MatchingLabels{LabelPreviewUID: string(p.UID)}
 	var snapshots snapshotv1.VolumeSnapshotList
@@ -248,19 +248,19 @@ func (r *PreviewReconciler) removeRestoreCopies(ctx context.Context, p *kuprav1a
 	return len(snapshots.Items) == 0 && len(contents.Items) == 0, nil
 }
 
-// chooseSnapshot finds the PreviewSnapshot a preview restores from. It returns a reason when there's none to use yet.
+// chooseSnapshot finds the PreviewSnapshot a preview restores from, or a reason there's none yet.
 func (r *PreviewReconciler) chooseSnapshot(ctx context.Context, p *kuprav1alpha1.Preview) (*kuprav1alpha1.PreviewSnapshot, string, string, error) {
 	from := p.Spec.RestoreFrom
 	if from.SnapshotRef != nil {
 		var s kuprav1alpha1.PreviewSnapshot
 		if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: from.SnapshotRef.Name}, &s); err != nil {
 			if apierrors.IsNotFound(err) {
-				return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s doesn't exist", from.SnapshotRef.Name), nil
+				return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s not found", from.SnapshotRef.Name), nil
 			}
 			return nil, "", "", err
 		}
 		if !s.Status.ReadyToUse || !s.DeletionTimestamp.IsZero() {
-			return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s isn't ready to use", s.Name), nil
+			return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s is not ready", s.Name), nil
 		}
 		return &s, "", "", nil
 	}
@@ -306,7 +306,7 @@ func selectorString(s labels.Selector) string {
 	return s.String()
 }
 
-// findCapture returns a snapshot's capture of a state resource, matched by name and kind.
+// findCapture returns a snapshot's capture of a state resource, by kind and name.
 func findCapture(s *kuprav1alpha1.PreviewSnapshot, gk schema.GroupKind, name string) *kuprav1alpha1.Capture {
 	for i, c := range s.Status.Captures {
 		if c.Group == gk.Group && c.Kind == gk.Kind && c.Name == name {
@@ -316,7 +316,7 @@ func findCapture(s *kuprav1alpha1.PreviewSnapshot, gk schema.GroupKind, name str
 	return nil
 }
 
-// unmatchedCaptures lists a snapshot's captures that match none of the preview's state resources.
+// unmatchedCaptures lists a snapshot's captures that match no state resource.
 func unmatchedCaptures(s *kuprav1alpha1.PreviewSnapshot, states []*unstructured.Unstructured) []string {
 	var out []string
 	for _, c := range s.Status.Captures {
@@ -330,7 +330,7 @@ func unmatchedCaptures(s *kuprav1alpha1.PreviewSnapshot, states []*unstructured.
 	return out
 }
 
-// remove deletes the objects in entries, and reports whether they're all gone.
+// remove deletes the objects in entries, and reports whether they're gone.
 func (r *PreviewReconciler) remove(ctx context.Context, c client.Client, namespace string, entries []kuprav1alpha1.InventoryEntry) (bool, error) {
 	gone := true
 	for _, entry := range entries {
@@ -352,7 +352,7 @@ func (r *PreviewReconciler) remove(ctx context.Context, c client.Client, namespa
 	return gone, nil
 }
 
-// getLive reads an object of a kind, or returns nil if it or its kind doesn't exist.
+// getLive reads an object, or returns nil if it or its kind doesn't exist.
 func (r *PreviewReconciler) getLive(ctx context.Context, c client.Client, gk schema.GroupKind, namespace, name string) (*unstructured.Unstructured, error) {
 	mapping, err := r.Mapper.RESTMapping(gk)
 	if apimeta.IsNoMatchError(err) {
@@ -396,14 +396,14 @@ func stopped(p *kuprav1alpha1.Preview, reason, message string) {
 type restorePlan struct {
 	// resources are the state resources to apply.
 	resources []*unstructured.Unstructured
-	// done is set once every state resource can be applied.
+	// done is set when every state resource can be applied.
 	done bool
-	// summary is set when this is the preview's first start, or its first after a reset, and says how its state started.
+	// summary says how the state started, on a preview's first start after creation or reset.
 	summary      string
 	fromSnapshot bool
 }
 
-// restoreState works out how each state resource starts, and returns the resources to apply. Until the preview's state has started, missing resources start from the snapshot it restores from, if any. After that, state the template gains starts empty, since only a reset restores. It returns a reason when the preview can't go on.
+// restoreState returns how each state resource starts, or a reason the preview can't go on. Until the state has started, missing resources are restored from the preview's snapshot. After that, new ones start empty.
 func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, namespace string, states []*unstructured.Unstructured) (plan *restorePlan, reason, message string, err error) {
 	var resources []*unstructured.Unstructured
 	done := true
@@ -414,7 +414,7 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		if p.Status.RestoredFrom != nil {
 			name = p.Status.RestoredFrom.Name
 		}
-		// The preview's hold records its choice before anything is restored, so a choice whose status write was lost is found again rather than made anew.
+		// The hold records the choice even if its status write was lost.
 		if name == "" {
 			held, err := r.heldSnapshot(ctx, p)
 			if err != nil {
@@ -429,11 +429,11 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 			}
 			name = s.Name
 		}
-		// The snapshot is held before anything is restored from it.
+		// Hold the snapshot before restoring anything from it.
 		s, reason, message, err := r.holdSnapshot(ctx, p, name)
 		if err != nil || reason != "" {
 			if reason == ReasonSnapshotNotFound && p.Status.RestoredFrom != nil {
-				message = fmt.Sprintf("PreviewSnapshot %s, which the preview restores from, was deleted; reset the preview to start again", name)
+				message = fmt.Sprintf("PreviewSnapshot %s not found", name)
 			}
 			return nil, reason, message, err
 		}
@@ -486,10 +486,10 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		if snapshot != nil {
 			message = "restored from PreviewSnapshot " + snapshot.Name
 			if len(empty) > 0 {
-				message += "; no capture for " + strings.Join(empty, ", ") + ", which started empty"
+				message += ", without captures of " + strings.Join(empty, ", ")
 			}
 			if unmatched := unmatchedCaptures(snapshot, states); len(unmatched) > 0 {
-				message += "; nothing to restore " + strings.Join(unmatched, ", ") + " into"
+				message += ", ignoring captures of " + strings.Join(unmatched, ", ")
 			}
 		}
 		plan.summary = message
@@ -497,7 +497,7 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 	return plan, "", "", nil
 }
 
-// recordRestore marks a preview's state as restored, once the state resources it applied exist and, when they came from a snapshot, have taken in its data. Until then, missing resources keep starting from the snapshot, which isn't deleted. It reports whether the restore is still settling.
+// recordRestore marks a preview's state as restored once its resources exist and no longer need the snapshot, and reports whether that's still pending.
 func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, plan *restorePlan) (bool, error) {
 	if plan.summary == "" {
 		return false, nil
@@ -516,11 +516,10 @@ func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.
 			}
 		}
 		if len(waiting) > 0 {
-			setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionFalse, meta.ProgressingReason, "waiting for "+strings.Join(waiting, ", ")+" to take in the restored data")
+			setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionFalse, meta.ProgressingReason, "waiting for "+strings.Join(waiting, ", ")+" to be restored")
 			return true, nil
 		}
 	}
-	// Restored state no longer needs the snapshot.
 	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return false, err
 	}
@@ -528,19 +527,19 @@ func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.
 	return false, nil
 }
 
-// RestoreFinalizerPrefix, followed by a Preview's UID, keeps a PreviewSnapshot while that preview restores from it.
+// RestoreFinalizerPrefix, followed by a Preview's UID, holds a PreviewSnapshot that preview restores from.
 const RestoreFinalizerPrefix = "kupra.futo.tech/restore-"
 
 func restoreFinalizer(p *kuprav1alpha1.Preview) string {
 	return RestoreFinalizerPrefix + string(p.UID)
 }
 
-// holdSnapshot keeps a snapshot from being deleted while the preview restores from it, with a finalizer of the preview's own. Kubernetes doesn't let finalizers be added to an object that's being deleted, and the write fails if the snapshot has changed since kupra read it live, so the hold and a deletion can't both succeed. It returns a reason when the snapshot can't be used.
+// holdSnapshot adds the preview's finalizer to a snapshot, or returns a reason it can't. The API server refuses new finalizers on objects being deleted, and the lock refuses the write if the snapshot changed since it was read.
 func (r *PreviewReconciler) holdSnapshot(ctx context.Context, p *kuprav1alpha1.Preview, name string) (*kuprav1alpha1.PreviewSnapshot, string, string, error) {
 	var s kuprav1alpha1.PreviewSnapshot
 	if err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: name}, &s); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s doesn't exist", name), nil
+			return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s not found", name), nil
 		}
 		return nil, "", "", err
 	}
@@ -549,7 +548,7 @@ func (r *PreviewReconciler) holdSnapshot(ctx context.Context, p *kuprav1alpha1.P
 		return &s, "", "", nil
 	}
 	if !s.Status.ReadyToUse || !s.DeletionTimestamp.IsZero() {
-		return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s isn't ready to use", name), nil
+		return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s is not ready", name), nil
 	}
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	controllerutil.AddFinalizer(&s, finalizer)
@@ -580,7 +579,7 @@ func (r *PreviewReconciler) releaseSnapshots(ctx context.Context, p *kuprav1alph
 	return nil
 }
 
-// heldSnapshot returns the name of the snapshot the preview holds, if any, read live.
+// heldSnapshot returns the name of the snapshot the preview holds, if any.
 func (r *PreviewReconciler) heldSnapshot(ctx context.Context, p *kuprav1alpha1.Preview) (string, error) {
 	var list kuprav1alpha1.PreviewSnapshotList
 	if err := r.APIReader.List(ctx, &list, client.InNamespace(p.Namespace)); err != nil {

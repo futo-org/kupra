@@ -27,7 +27,7 @@ type PreviewSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners can't be system users or groups, such as system:authenticated"
 	Owners []rbacv1.Subject `json:"owners,omitempty"`
 
-	// RestoreFrom chooses a snapshot for the preview's state to start from. Without it, state starts empty. It's only used when the preview starts, or is reset.
+	// RestoreFrom is the snapshot the preview's state starts from, when it starts or is reset. Without it, state starts empty.
 	// +optional
 	RestoreFrom *RestoreSource `json:"restoreFrom,omitempty"`
 }
@@ -37,7 +37,7 @@ type RestoreSource struct {
 	// SnapshotRef names a PreviewSnapshot in the preview's namespace.
 	// +optional
 	SnapshotRef *meta.LocalObjectReference `json:"snapshotRef,omitempty"`
-	// SnapshotSelector selects the newest ready PreviewSnapshot in the preview's namespace with matching labels.
+	// SnapshotSelector selects the newest ready PreviewSnapshot in the preview's namespace.
 	// +optional
 	SnapshotSelector *metav1.LabelSelector `json:"snapshotSelector,omitempty"`
 }
@@ -72,7 +72,7 @@ type PreviewStatus struct {
 	// +optional
 	RestoredFrom *meta.LocalObjectReference `json:"restoredFrom,omitempty"`
 
-	// LastHandledResetAt is the last kupra.futo.tech/reset-requested-at value kupra handled.
+	// LastHandledResetAt is the last handled value of the kupra.futo.tech/reset-requested-at annotation.
 	// +optional
 	LastHandledResetAt string `json:"lastHandledResetAt,omitempty"`
 
@@ -95,10 +95,10 @@ type PreviewStatus struct {
 // InventoryEntry is a resource kupra applied for a preview.
 type InventoryEntry struct {
 	corev1.TypedLocalObjectReference `json:",inline"`
-	// State is set for resources kupra handles as state. It keeps them when they're no longer rendered.
+	// State is set for state, which is kept when it's no longer rendered.
 	// +optional
 	State bool `json:"state,omitempty"`
-	// Retained is set for state that's no longer rendered, which kupra keeps until the preview is reset or deleted.
+	// Retained is set for state that's no longer rendered, until the preview is reset.
 	// +optional
 	Retained bool `json:"retained,omitempty"`
 }

@@ -10,7 +10,7 @@ type PreviewSnapshotSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="source is immutable"
 	Source SnapshotSource `json:"source"`
 
-	// Mode chooses how the snapshot is kept consistent. Offline stops the preview's app while its state is captured. Online captures while it runs, so captures may not line up with each other.
+	// Mode is how the snapshot is kept consistent: Offline stops the preview's app while capturing, and Online doesn't.
 	// +optional
 	// +kubebuilder:default=Offline
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="mode is immutable"
@@ -48,11 +48,11 @@ type PreviewSnapshotStatus struct {
 	// +optional
 	Phase PreviewSnapshotPhase `json:"phase,omitempty"`
 
-	// StartTime is when kupra started capturing.
+	// StartTime is when the capture started.
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
 
-	// CompletionTime is when capturing succeeded or failed.
+	// CompletionTime is when the capture succeeded or failed.
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
@@ -60,11 +60,11 @@ type PreviewSnapshotStatus struct {
 	// +optional
 	AppRef *meta.LocalObjectReference `json:"appRef,omitempty"`
 
-	// Parameters are the source preview's parameters when it was captured.
+	// Parameters are the source preview's parameters when captured.
 	// +optional
 	Parameters map[string]string `json:"parameters,omitempty"`
 
-	// Captures are the state resources captured, matched by name and kind when restoring.
+	// Captures are the captured state resources.
 	// +optional
 	// +listType=atomic
 	Captures []Capture `json:"captures,omitempty"`
@@ -84,7 +84,7 @@ type Capture struct {
 	Group string `json:"group"`
 	Kind  string `json:"kind"`
 	Name  string `json:"name"`
-	// Data are the objects in the snapshot's namespace that hold the captured data, such as VolumeSnapshots.
+	// Data are the objects in the snapshot's namespace that hold the capture, such as VolumeSnapshots.
 	// +listType=atomic
 	Data []corev1.TypedLocalObjectReference `json:"data"`
 }

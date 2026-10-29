@@ -22,7 +22,7 @@ import (
 	"github.com/futo-org/kupra/internal/controller"
 )
 
-// finishDeletions does what envtest has no controllers for: it removes the finalizers that the garbage collector and PVC protection would, from objects being deleted in a namespace.
+// finishDeletions removes the finalizers that the garbage collector and PVC protection would, which envtest doesn't run.
 func finishDeletions(t *testing.T, namespace string) {
 	t.Helper()
 	ctx := context.Background()
@@ -52,7 +52,7 @@ func finishDeletions(t *testing.T, namespace string) {
 	}
 }
 
-// takeSnapshot plays the snapshot controller for a VolumeSnapshot of a claim: it creates the VolumeSnapshotContent and marks both ready.
+// takeSnapshot plays the snapshot controller: it creates a VolumeSnapshotContent for vs, and marks both ready.
 func takeSnapshot(t *testing.T, vs *snapshotv1.VolumeSnapshot, handle string) {
 	t.Helper()
 	ctx := context.Background()
@@ -87,7 +87,7 @@ func bindSnapshot(t *testing.T, vs *snapshotv1.VolumeSnapshot, contentName strin
 	}
 }
 
-// waitForVolumeSnapshot waits for a VolumeSnapshot that a PreviewSnapshot or Preview has labelled as its own, in a namespace.
+// waitForVolumeSnapshot waits for the one VolumeSnapshot in a namespace with a label.
 func waitForVolumeSnapshot(t *testing.T, namespace, label, uid string) *snapshotv1.VolumeSnapshot {
 	t.Helper()
 	var found snapshotv1.VolumeSnapshot
@@ -270,7 +270,7 @@ template:
 			t.Errorf("claim's data source = %+v, want %s", ref, copied.Name)
 		}
 
-		// The app runs on the claim before it's bound, as storage that binds on first use needs, but the restore isn't over until then.
+		// The app starts before the claim is bound, but the restore isn't over until it is.
 		waitForRestored(t, "snapshots", "restored", metav1.ConditionFalse, "PersistentVolumeClaim data")
 		bindClaim(t, p.Status.Namespace, "data")
 		waitForRestored(t, "snapshots", "restored", metav1.ConditionTrue, "restored from PreviewSnapshot base-1")
@@ -359,7 +359,7 @@ template:
 	})
 }
 
-// bindClaim plays the provisioner: it marks a claim as bound, which is when a claim restored from a snapshot has taken in its data.
+// bindClaim plays the provisioner, and marks a claim as bound.
 func bindClaim(t *testing.T, namespace, name string) {
 	t.Helper()
 	eventually(t, func() error {
@@ -484,7 +484,7 @@ template:
 	if !slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+string(p.UID)) {
 		t.Errorf("snapshot finalizers = %v, want the preview's hold", snap.Finalizers)
 	}
-	// If the status recording the choice is lost, the preview finds its hold again rather than choosing anew, even when a newer snapshot matches.
+	// With its status lost, the preview restores from the snapshot it holds, not a newer one.
 	newer := &kuprav1alpha1.PreviewSnapshot{
 		ObjectMeta: metav1.ObjectMeta{Name: "newer", Namespace: "restore-retries", Labels: map[string]string{"kupra.futo.tech/channel": "base"}},
 		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "gone"}}},
@@ -542,7 +542,7 @@ template:
 	})
 }
 
-// A snapshot that starts being deleted after a preview chose it, but before the preview holds it, isn't restored from.
+// A snapshot deleted between a preview choosing it and holding it isn't held.
 func TestHoldSnapshotBeingDeleted(t *testing.T) {
 	ctx := context.Background()
 	createNamespace(t, "holds", nil)

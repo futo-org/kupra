@@ -124,9 +124,8 @@ spec:
                   type.
                 type: object
               restoreFrom:
-                description: RestoreFrom chooses a snapshot for the preview's state
-                  to start from. Without it, state starts empty. It's only used when
-                  the preview starts, or is reset.
+                description: RestoreFrom is the snapshot the preview's state starts
+                  from, when it starts or is reset. Without it, state starts empty.
                 properties:
                   snapshotRef:
                     description: SnapshotRef names a PreviewSnapshot in the preview's
@@ -140,7 +139,7 @@ spec:
                     type: object
                   snapshotSelector:
                     description: SnapshotSelector selects the newest ready PreviewSnapshot
-                      in the preview's namespace with matching labels.
+                      in the preview's namespace.
                     properties:
                       matchExpressions:
                         description: matchExpressions is a list of label selector
@@ -273,11 +272,11 @@ spec:
                       type: string
                     retained:
                       description: Retained is set for state that's no longer rendered,
-                        which kupra keeps until the preview is reset or deleted.
+                        until the preview is reset.
                       type: boolean
                     state:
-                      description: State is set for resources kupra handles as state.
-                        It keeps them when they're no longer rendered.
+                      description: State is set for state, which is kept when it's
+                        no longer rendered.
                       type: boolean
                   required:
                   - kind
@@ -287,8 +286,8 @@ spec:
                 type: array
                 x-kubernetes-list-type: atomic
               lastHandledResetAt:
-                description: LastHandledResetAt is the last kupra.futo.tech/reset-requested-at
-                  value kupra handled.
+                description: LastHandledResetAt is the last handled value of the kupra.futo.tech/reset-requested-at
+                  annotation.
                 type: string
               links:
                 items:

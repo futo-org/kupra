@@ -60,7 +60,7 @@ const (
 	// Readiness of applied resources is polled, since they can be of any kind.
 	startingInterval = 5 * time.Second
 	runningInterval  = 5 * time.Minute
-	// nextStepInterval is how soon kupra comes back to a preview to take the next step of a capture or reset.
+	// nextStepInterval is how soon a capture or reset takes its next step.
 	nextStepInterval = time.Second
 )
 
@@ -112,7 +112,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		result, err = r.reconcile(ctx, &preview)
 	}
-	// The lock makes a reconciliation that started from a stale read fail here and start again, rather than write stale status, such as a condition another reconciliation has since changed.
+	// The lock keeps a reconciliation that started from a stale read from writing stale status.
 	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
 		if apierrors.IsConflict(patchErr) && err == nil {
 			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
@@ -162,7 +162,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 			pending(p, reason, message)
 			return ctrl.Result{RequeueAfter: recheckInterval}, nil
 		}
-		// Requests that act on what's already running come before convergence, in the order ADR 10 gives them.
+		// Captures, then resets, come before converging, as in ADR 10.
 		applier, err := r.impersonate(accountName)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -171,7 +171,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			// Changes to the spec wait until the capture has finished.
+			// Spec changes wait for the capture.
 			p.Status.ObservedGeneration = observedGeneration
 			return r.reconcileCapture(ctx, p, s, applier, nsName)
 		}
@@ -237,7 +237,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, err
 	}
 
-	// State goes first, so data and claims are in place before anything uses them.
+	// State goes first, so it's in place before anything uses it.
 	var states, workload []*unstructured.Unstructured
 	for _, obj := range rendered.Objects {
 		if _, ok := state.For(obj.GroupVersionKind().GroupKind()); ok && !obj.NotState {
@@ -253,7 +253,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	switch reason {
 	case "":
 	case ReasonSnapshotNotFound, ReasonSnapshotNotReady:
-		// The snapshot may still appear or become ready, and kupra watches PreviewSnapshots.
+		// PreviewSnapshots are watched, so this is retried when one changes.
 		pending(p, reason, message)
 		return ctrl.Result{}, nil
 	default:
@@ -355,7 +355,7 @@ func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha
 	var existing corev1.Namespace
 	err = r.Get(ctx, client.ObjectKey{Name: name}, &existing)
 	if apierrors.IsNotFound(err) {
-		// Create rather than apply, so a namespace that appeared since the read is checked instead of taken over.
+		// Create rather than apply, so a namespace that appeared since the read isn't taken over.
 		existing = corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{AnnotationPreviewUID: string(p.UID)}}}
 		err = r.Create(ctx, &existing, client.FieldOwner(FieldManager))
 		if apierrors.IsAlreadyExists(err) {
@@ -382,7 +382,7 @@ func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha
 	labels[LabelPreviewNamespace] = p.Namespace
 	annotations[AnnotationPreviewUID] = string(p.UID)
 
-	// The resourceVersion makes the apply fail if the namespace changed since its owner was checked.
+	// The resourceVersion fails the apply if the namespace changed since its owner was checked.
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, ResourceVersion: existing.ResourceVersion, Labels: labels, Annotations: annotations}}
 	return "", "", r.applyObject(ctx, r.Client, ns)
 }
@@ -515,7 +515,7 @@ func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstruc
 	return applied, errors.Join(errs...)
 }
 
-// prune deletes resources that were applied before, but are no longer rendered. It keeps state, since it holds data the preview has built up, and returns it: it goes when the preview is reset or deleted.
+// prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted.
 func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
 	var retained []kuprav1alpha1.InventoryEntry
 	var errs []error
@@ -548,7 +548,7 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 	return retained, errors.Join(errs...)
 }
 
-// readiness judges applied resources: those of a kind kupra supports as state by that kind's own rules, and anything else with kstatus, the way Flux does.
+// readiness judges applied resources by their kind's own rules if kupra supports it as state, and with kstatus otherwise, the way Flux does.
 func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstructured) (bool, string, error) {
 	var waiting []string
 	for _, obj := range objs {
@@ -588,7 +588,7 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, bool, error) {
 	nsName := names.PreviewNamespace(p.Namespace, p.Name)
 
-	// A capture that has started finishes first.
+	// A started capture finishes first.
 	if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
 		if err != nil {
 			return ctrl.Result{}, false, err
@@ -601,7 +601,6 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 		return result, false, err
 	}
 
-	// A preview that's going away no longer needs the snapshot it restores from.
 	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return ctrl.Result{}, false, err
 	}
@@ -697,7 +696,7 @@ func sameObject(a, b corev1.TypedLocalObjectReference) bool {
 	return refGroup(a) == refGroup(b) && a.Kind == b.Kind && a.Name == b.Name
 }
 
-// unionInventory adds the entries of b that a doesn't have to a.
+// unionInventory adds to a the entries of b that it doesn't have.
 func unionInventory(a, b []kuprav1alpha1.InventoryEntry) []kuprav1alpha1.InventoryEntry {
 	out := slices.Clone(a)
 	for _, entry := range b {
@@ -783,7 +782,7 @@ func (r *PreviewReconciler) previews(ctx context.Context, opts ...client.ListOpt
 	return requests
 }
 
-// previewsForSnapshot maps a PreviewSnapshot to the preview it captures, and to the previews in its namespace that restore from a snapshot, since it may be the one they're waiting for.
+// previewsForSnapshot maps a PreviewSnapshot to the preview it captures, and to the previews in its namespace that restore from a snapshot.
 func (r *PreviewReconciler) previewsForSnapshot(ctx context.Context, obj client.Object) []reconcile.Request {
 	s, ok := obj.(*kuprav1alpha1.PreviewSnapshot)
 	if !ok {
