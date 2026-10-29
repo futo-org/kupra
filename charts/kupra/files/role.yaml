@@ -29,7 +29,6 @@ rules:
   resources:
   - previewapps
   - previewpolicies
-  - previewsnapshots
   verbs:
   - get
   - list
@@ -39,6 +38,7 @@ rules:
   resources:
   - previewapps/status
   - previews/status
+  - previewsnapshots/status
   verbs:
   - get
   - patch
@@ -59,8 +59,19 @@ rules:
   - kupra.futo.tech
   resources:
   - previews/finalizers
+  - previewsnapshots/finalizers
   verbs:
   - update
+- apiGroups:
+  - kupra.futo.tech
+  resources:
+  - previewsnapshots
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:
@@ -95,6 +106,17 @@ rules:
   - roles
   verbs:
   - create
+  - patch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshotcontents
+  - volumesnapshots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
   - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -59,6 +59,8 @@ const (
 	// Readiness of applied resources is polled, since they can be of any kind.
 	startingInterval = 5 * time.Second
 	runningInterval  = 5 * time.Minute
+	// nextStepInterval is how soon kupra comes back to a preview to take the next step of a capture or reset.
+	nextStepInterval = time.Second
 )
 
 // PreviewReconciler runs previews: their namespaces, the policy's settings there, and their rendered templates.
@@ -121,6 +123,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
+	observedGeneration := p.Status.ObservedGeneration
 	p.Status.ObservedGeneration = p.Generation
 	nsName := previewNamespaceName(p.Namespace, p.Name)
 	p.Status.Namespace = nsName
@@ -154,6 +157,25 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 			pending(p, reason, message)
 			return ctrl.Result{RequeueAfter: recheckInterval}, nil
 		}
+		// Requests that act on what's already running come before convergence, in the order ADR 10 gives them.
+		applier, err := r.impersonate(accountName)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			// Changes to the spec wait until the capture has finished.
+			p.Status.ObservedGeneration = observedGeneration
+			return r.reconcileCapture(ctx, p, s, applier, nsName)
+		}
+		if resetRequested(p) {
+			return r.reconcileReset(ctx, p, applier, nsName)
+		}
+	} else if resetRequested(p) {
+		// There's nothing to reset yet.
+		p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
 	}
 
 	var app kuprav1alpha1.PreviewApp
@@ -211,21 +233,40 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 
 	// State goes first, so data and claims are in place before anything uses them.
-	var states []*unstructured.Unstructured
-	var workload []*unstructured.Unstructured
+	var states, workload []*unstructured.Unstructured
 	for _, obj := range rendered.Objects {
-		if kind, ok := state.For(obj.GroupVersionKind().GroupKind()); ok && !obj.NotState {
-			states = append(states, kind.Restore(obj.Unstructured))
+		if _, ok := state.For(obj.GroupVersionKind().GroupKind()); ok && !obj.NotState {
+			states = append(states, obj.Unstructured)
 			continue
 		}
 		workload = append(workload, obj.Unstructured)
 	}
+	restored, restoreDone, reason, message, err := r.restoreState(ctx, p, applier, nsName, states)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	switch reason {
+	case "":
+	case ReasonSnapshotNotFound, ReasonSnapshotNotReady:
+		// The snapshot may still appear or become ready, and kupra watches PreviewSnapshots.
+		pending(p, reason, message)
+		return ctrl.Result{}, nil
+	default:
+		failed(p, reason, message)
+		return ctrl.Result{}, nil
+	}
 
-	applied, err := applyAll(ctx, applier, states, true)
+	applied, err := applyAll(ctx, applier, restored, true)
+	if err == nil && !restoreDone {
+		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
+		provisioning(p, "restoring state")
+		stallAfterTimeout(p, &app, "restoring state")
+		return ctrl.Result{RequeueAfter: startingInterval}, nil
+	}
 	if err == nil {
 		var ready bool
 		var message string
-		ready, message, err = readiness(ctx, applier, states)
+		ready, message, err = readiness(ctx, applier, restored)
 		if err == nil && !ready {
 			p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
 			provisioning(p, message)
@@ -261,6 +302,11 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	if ready {
 		running(p)
+		if started, err := r.startCapture(ctx, p); err != nil {
+			return ctrl.Result{}, err
+		} else if started {
+			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+		}
 		return ctrl.Result{RequeueAfter: runningInterval}, nil
 	}
 	starting(p, meta.ProgressingReason, message)
@@ -528,6 +574,20 @@ func readiness(ctx context.Context, c client.Client, objs []*unstructured.Unstru
 // reconcileDelete removes the preview's namespace and apply account. It reports whether cleanup is done, so the finalizer can go.
 func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, bool, error) {
 	nsName := previewNamespaceName(p.Namespace, p.Name)
+
+	// A capture that has started finishes first.
+	if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
+		if err != nil {
+			return ctrl.Result{}, false, err
+		}
+		applier, err := r.impersonate(nsName)
+		if err != nil {
+			return ctrl.Result{}, false, err
+		}
+		result, err := r.reconcileCapture(ctx, p, s, applier, nsName)
+		return result, false, err
+	}
+
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonTerminating, "")
 	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
@@ -550,6 +610,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	}
 	if !gone {
 		return ctrl.Result{RequeueAfter: startingInterval}, false, nil
+	}
+	if gone, err := r.removeRestoreCopies(ctx, p, nsName); err != nil || !gone {
+		return ctrl.Result{RequeueAfter: startingInterval}, false, err
 	}
 
 	// Another Preview's account can have the same name, when their namespace names collide.
@@ -629,11 +692,19 @@ func unionInventory(a, b []kuprav1alpha1.InventoryEntry) []kuprav1alpha1.Invento
 	return out
 }
 
-const appRefIndex = ".spec.appRef.name"
+const (
+	appRefIndex = ".spec.appRef.name"
+	sourceIndex = ".spec.source.previewRef.name"
+)
 
 func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(ctx, &kuprav1alpha1.Preview{}, appRefIndex, func(obj client.Object) []string {
 		return []string{obj.(*kuprav1alpha1.Preview).Spec.AppRef.Name}
+	}); err != nil {
+		return err
+	}
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &kuprav1alpha1.PreviewSnapshot{}, sourceIndex, func(obj client.Object) []string {
+		return []string{obj.(*kuprav1alpha1.PreviewSnapshot).Spec.Source.PreviewRef.Name}
 	}); err != nil {
 		return err
 	}
@@ -646,6 +717,7 @@ func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		))).
 		Watches(&kuprav1alpha1.PreviewApp{}, handler.EnqueueRequestsFromMapFunc(r.previewsOfApp)).
 		Watches(&kuprav1alpha1.PreviewPolicy{}, handler.EnqueueRequestsFromMapFunc(r.allPreviews)).
+		Watches(&kuprav1alpha1.PreviewSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.previewsForSnapshot)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.previewsForNamespace)).
 		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.previewsForAdminBinding)).
 		Complete(r)
@@ -689,6 +761,26 @@ func (r *PreviewReconciler) previews(ctx context.Context, opts ...client.ListOpt
 	requests := make([]reconcile.Request, len(previews.Items))
 	for i, p := range previews.Items {
 		requests[i] = reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)}
+	}
+	return requests
+}
+
+// previewsForSnapshot maps a PreviewSnapshot to the preview it captures, and to the previews in its namespace that restore from a snapshot, since it may be the one they're waiting for.
+func (r *PreviewReconciler) previewsForSnapshot(ctx context.Context, obj client.Object) []reconcile.Request {
+	s, ok := obj.(*kuprav1alpha1.PreviewSnapshot)
+	if !ok {
+		return nil
+	}
+	var previews kuprav1alpha1.PreviewList
+	if err := r.List(ctx, &previews, client.InNamespace(s.Namespace)); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "listing Previews")
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, p := range previews.Items {
+		if p.Name == s.Spec.Source.PreviewRef.Name || p.Spec.RestoreFrom != nil {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&p)})
+		}
 	}
 	return requests
 }
