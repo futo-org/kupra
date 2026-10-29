@@ -4,6 +4,11 @@
   "include-component-in-tag": false,
   "bootstrap-sha": "e905dcf87302b5250f032186d9fe554fdecdb5a4",
   "packages": {
-    ".": {}
+    ".": {
+      "extra-files": [
+        { "type": "yaml", "path": "charts/kupra/Chart.yaml", "jsonpath": "$.version" },
+        { "type": "yaml", "path": "charts/kupra/Chart.yaml", "jsonpath": "$.appVersion" }
+      ]
+    }
   }
 }
