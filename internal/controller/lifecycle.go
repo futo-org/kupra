@@ -212,7 +212,7 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 		stopping(p, ReasonResetting, "removing the app and its state")
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
 	}
-	if err := r.releaseSnapshots(ctx, p, ""); err != nil {
+	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return ctrl.Result{}, err
 	}
 	p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
@@ -412,23 +412,29 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		name := ""
 		if p.Status.RestoredFrom != nil {
 			name = p.Status.RestoredFrom.Name
-		} else {
+		}
+		// The preview's hold records its choice before anything is restored, so a choice whose status write was lost is found again rather than made anew.
+		if name == "" {
+			held, err := r.heldSnapshot(ctx, p)
+			if err != nil {
+				return nil, "", "", err
+			}
+			name = held
+		}
+		if name == "" {
 			s, reason, message, err := r.chooseSnapshot(ctx, p)
 			if err != nil || reason != "" {
 				return nil, reason, message, err
 			}
 			name = s.Name
 		}
-		// The snapshot is held before anything is restored from it, and its choice is only recorded once it is.
+		// The snapshot is held before anything is restored from it.
 		s, reason, message, err := r.holdSnapshot(ctx, p, name)
 		if err != nil || reason != "" {
 			if reason == ReasonSnapshotNotFound && p.Status.RestoredFrom != nil {
 				message = fmt.Sprintf("PreviewSnapshot %s, which the preview restores from, was deleted; reset the preview to start again", name)
 			}
 			return nil, reason, message, err
-		}
-		if err := r.releaseSnapshots(ctx, p, s.Name); err != nil {
-			return nil, "", "", err
 		}
 		p.Status.RestoredFrom = &meta.LocalObjectReference{Name: s.Name}
 		snapshot = s
@@ -514,7 +520,7 @@ func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.
 		}
 	}
 	// Restored state no longer needs the snapshot.
-	if err := r.releaseSnapshots(ctx, p, ""); err != nil {
+	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return false, err
 	}
 	setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionTrue, meta.SucceededReason, plan.summary)
@@ -552,8 +558,8 @@ func (r *PreviewReconciler) holdSnapshot(ctx context.Context, p *kuprav1alpha1.P
 	return &s, "", "", nil
 }
 
-// releaseSnapshots removes the preview's hold from the snapshots in its namespace, apart from keep.
-func (r *PreviewReconciler) releaseSnapshots(ctx context.Context, p *kuprav1alpha1.Preview, keep string) error {
+// releaseSnapshots removes the preview's hold from the snapshots in its namespace.
+func (r *PreviewReconciler) releaseSnapshots(ctx context.Context, p *kuprav1alpha1.Preview) error {
 	var list kuprav1alpha1.PreviewSnapshotList
 	if err := r.APIReader.List(ctx, &list, client.InNamespace(p.Namespace)); err != nil {
 		return err
@@ -561,7 +567,7 @@ func (r *PreviewReconciler) releaseSnapshots(ctx context.Context, p *kuprav1alph
 	finalizer := restoreFinalizer(p)
 	for i := range list.Items {
 		s := &list.Items[i]
-		if s.Name == keep || !controllerutil.ContainsFinalizer(s, finalizer) {
+		if !controllerutil.ContainsFinalizer(s, finalizer) {
 			continue
 		}
 		patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
@@ -571,4 +577,19 @@ func (r *PreviewReconciler) releaseSnapshots(ctx context.Context, p *kuprav1alph
 		}
 	}
 	return nil
+}
+
+// heldSnapshot returns the name of the snapshot the preview holds, if any, read live.
+func (r *PreviewReconciler) heldSnapshot(ctx context.Context, p *kuprav1alpha1.Preview) (string, error) {
+	var list kuprav1alpha1.PreviewSnapshotList
+	if err := r.APIReader.List(ctx, &list, client.InNamespace(p.Namespace)); err != nil {
+		return "", err
+	}
+	finalizer := restoreFinalizer(p)
+	for _, s := range list.Items {
+		if controllerutil.ContainsFinalizer(&s, finalizer) {
+			return s.Name, nil
+		}
+	}
+	return "", nil
 }

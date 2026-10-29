@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -483,6 +484,46 @@ template:
 	if !slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+string(p.UID)) {
 		t.Errorf("snapshot finalizers = %v, want the preview's hold", snap.Finalizers)
 	}
+	// If the status recording the choice is lost, the preview finds its hold again rather than choosing anew, even when a newer snapshot matches.
+	newer := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "newer", Namespace: "restore-retries", Labels: map[string]string{"kupra.futo.tech/channel": "base"}},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "gone"}}},
+	}
+	if err := k8s.Create(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	later := metav1.NewTime(now.Add(time.Hour))
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(newer), newer); err != nil {
+			return err
+		}
+		newer.Status = kuprav1alpha1.PreviewSnapshotStatus{StartTime: &later, CompletionTime: &later, Phase: kuprav1alpha1.PreviewSnapshotSucceeded, ReadyToUse: true, Captures: status.Captures}
+		return k8s.Status().Update(ctx, newer)
+	})
+	eventually(t, func() error {
+		got := getPreview(t, "restore-retries", "retry")
+		got.Status.RestoredFrom = nil
+		return k8s.Status().Update(ctx, got)
+	})
+	var recovered string
+	eventually(t, func() error {
+		got := getPreview(t, "restore-retries", "retry")
+		if got.Status.RestoredFrom == nil {
+			return fmt.Errorf("restoredFrom isn't recorded again yet")
+		}
+		recovered = got.Status.RestoredFrom.Name
+		return nil
+	})
+	if recovered != "base" {
+		t.Errorf("restoredFrom = %s, want base, which the preview holds", recovered)
+	}
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(newer), newer); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(newer.Finalizers, controller.RestoreFinalizerPrefix+string(p.UID)) {
+		t.Errorf("snapshot newer is held too: %v", newer.Finalizers)
+	}
+
 	if err := k8s.Delete(ctx, snap); err != nil {
 		t.Fatal(err)
 	}

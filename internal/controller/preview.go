@@ -601,7 +601,7 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	}
 
 	// A preview that's going away no longer needs the snapshot it restores from.
-	if err := r.releaseSnapshots(ctx, p, ""); err != nil {
+	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return ctrl.Result{}, false, err
 	}
 
