@@ -1,0 +1,76 @@
+# Helm installs the CRDs in crds/ but never upgrades them. Apply them separately on upgrade, or use Flux's `crds: CreateReplace`.
+
+operator:
+  replicas: 1
+  image:
+    repository: ghcr.io/futo-org/kupra-operator
+    # Defaults to the chart's appVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  # Extra arguments, such as --zap-log-level=debug.
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+
+# The spec of the PreviewPolicy named default, which other policies fall back to. Change the defaults here rather than by editing the object, which Helm would revert.
+# Lists replace the defaults rather than merging with them, and a field set to null is removed.
+defaultPolicy:
+  apply:
+    clusterRoleRef:
+      name: kupra-preview-template
+  networkPolicies:
+    - metadata:
+        name: restrict-egress
+      spec:
+        podSelector: {}
+        policyTypes: [Egress]
+        egress:
+          - to:
+              - podSelector: {}
+          - to:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: kube-system
+                podSelector:
+                  matchLabels:
+                    k8s-app: kube-dns
+          - to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+                  except:
+                    - 10.0.0.0/8
+                    - 172.16.0.0/12
+                    - 192.168.0.0/16
+                    - 100.64.0.0/10
+                    - 169.254.0.0/16
+              - ipBlock:
+                  cidr: ::/0
+                  except:
+                    - fc00::/7
+                    - fe80::/10
+  resourceQuota:
+    hard:
+      requests.cpu: "4"
+      requests.memory: 16Gi
+  limitRange:
+    limits:
+      - type: Container
+        defaultRequest:
+          cpu: 100m
+          memory: 128Mi
+        default:
+          memory: 1Gi
+  namespaceMetadata:
+    labels:
+      pod-security.kubernetes.io/enforce: baseline

@@ -1,0 +1,12 @@
+# Renovate pins this by digest, with the custom manager in renovate.json.
+defaultBaseImage: cgr.dev/chainguard/static:latest
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
+builds:
+  - id: operator
+    main: ./cmd/operator
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w

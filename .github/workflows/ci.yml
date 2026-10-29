@@ -53,5 +53,8 @@ jobs:
       - name: Create cluster
         run: mise run e2e:up
 
+      - name: Run smoke test
+        run: mise run test:smoke
+
       - name: Run end-to-end tests
         run: mise run test:e2e
