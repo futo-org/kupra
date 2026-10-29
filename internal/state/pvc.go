@@ -123,11 +123,8 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 		if err := fromUnstructured(targetObj, &vs); err != nil {
 			return Response{Failed: err.Error()}
 		}
-		if failed := snapshotError(&vs); failed != "" {
-			return Response{Failed: failed}
-		}
 		if vs.Status == nil || vs.Status.ReadyToUse == nil || !*vs.Status.ReadyToUse {
-			return Response{Observe: []Ref{source, target}}
+			return Response{Observe: []Ref{source, target}, Waiting: snapshotError(&vs)}
 		}
 		if sourceObj != nil {
 			return Response{Delete: []Ref{source}, Observe: []Ref{source, target}}
@@ -148,11 +145,8 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	if err := fromUnstructured(sourceObj, &vs); err != nil {
 		return Response{Failed: err.Error()}
 	}
-	if failed := snapshotError(&vs); failed != "" {
-		return Response{Failed: failed}
-	}
 	if vs.Status == nil || vs.Status.ReadyToUse == nil || !*vs.Status.ReadyToUse || vs.Status.BoundVolumeSnapshotContentName == nil {
-		return Response{Observe: []Ref{source, target}}
+		return Response{Observe: []Ref{source, target}, Waiting: snapshotError(&vs)}
 	}
 	contentRef := Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: *vs.Status.BoundVolumeSnapshotContentName}
 	contentObj, ok := req.Observed[contentRef]

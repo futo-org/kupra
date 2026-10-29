@@ -179,8 +179,10 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 			return r.reconcileReset(ctx, p, applier, nsName)
 		}
 	} else if resetRequested(p) {
-		// There's nothing to reset yet.
-		p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
+		// Without a namespace, there's no app or state to remove.
+		if done, err := r.finishReset(ctx, p, nsName); err != nil || !done {
+			return ctrl.Result{RequeueAfter: startingInterval}, err
+		}
 	}
 
 	var app kuprav1alpha1.PreviewApp

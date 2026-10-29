@@ -40,6 +40,13 @@ func staleReconciler(t *testing.T, name string, stale *corev1.Namespace) *contro
 				stale.DeepCopyInto(ns)
 				return nil
 			},
+			// The manager's index for snapshots by source isn't there, and these previews have no snapshots.
+			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*kuprav1alpha1.PreviewSnapshotList); ok {
+					return nil
+				}
+				return c.List(ctx, list, opts...)
+			},
 		}),
 		APIReader: c,
 		Namespace: kupraNamespace,
@@ -110,8 +117,8 @@ func TestNamespaceReplacedSinceRead(t *testing.T) {
 			replaceNamespace(t, name, "other")
 
 			r := staleReconciler(t, name, stale)
-			if err := tc.run(r, p, name); err == nil {
-				t.Error("want an error from the stale read")
+			if err := tc.run(r, p, name); !apierrors.IsConflict(err) {
+				t.Errorf("error = %v, want a conflict from the stale read", err)
 			}
 			var ns corev1.Namespace
 			if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &ns); err != nil {

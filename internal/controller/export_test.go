@@ -23,3 +23,7 @@ func (r *PreviewReconciler) HoldSnapshot(ctx context.Context, p *kuprav1alpha1.P
 	_, reason, _, err := r.holdSnapshot(ctx, p, name)
 	return reason, err
 }
+
+func (r *PreviewReconciler) FinishReset(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
+	return r.finishReset(ctx, p, namespace)
+}

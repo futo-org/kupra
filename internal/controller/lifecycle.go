@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
@@ -30,6 +31,9 @@ const (
 
 	// ConditionRestored is true once a preview's state has started, empty or from a snapshot.
 	ConditionRestored = "Restored"
+
+	// captureTimeout is how long a capture may take before it fails.
+	captureTimeout = 30 * time.Minute
 
 	ReasonCapturing        = "Capturing"
 	ReasonResetting        = "Resetting"
@@ -167,12 +171,20 @@ func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alph
 			return ctrl.Result{RequeueAfter: nextStepInterval}, r.finishSnapshot(ctx, s, nil, fmt.Sprintf("capturing %s %s: %s", entry.Kind, entry.Name, resp.Failed))
 		}
 		if !resp.Done {
-			waiting = append(waiting, entry.Kind+" "+entry.Name)
+			w := entry.Kind + " " + entry.Name
+			if resp.Waiting != "" {
+				w += ": " + resp.Waiting
+			}
+			waiting = append(waiting, w)
 			continue
 		}
 		captures = append(captures, kuprav1alpha1.Capture{Group: gk.Group, Kind: gk.Kind, Name: entry.Name, Data: resp.Capture.Data})
 	}
 	if len(waiting) > 0 {
+		// An Offline capture keeps the app stopped, so one that can't finish fails rather than wait forever.
+		if time.Since(s.Status.StartTime.Time) > captureTimeout {
+			return ctrl.Result{RequeueAfter: nextStepInterval}, r.finishSnapshot(ctx, s, nil, fmt.Sprintf("not finished after %s: waiting for %s", captureTimeout, strings.Join(waiting, "; ")))
+		}
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
 	}
 	// The app starts again on the next reconciliation.
@@ -213,7 +225,7 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 		gone, err = r.remove(ctx, applier, namespace, stateEntries(p.Status.Inventory))
 	}
 	if err == nil && gone {
-		gone, err = r.removeRestoreCopies(ctx, p, namespace)
+		gone, err = r.finishReset(ctx, p, namespace)
 	}
 	if err != nil {
 		return ctrl.Result{}, err
@@ -222,15 +234,23 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 		stopping(p, ReasonResetting, "removing app and state")
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
 	}
+	provisioning(p, "reset")
+	return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+}
+
+// finishReset removes a preview's restore copies and snapshot holds, then records the reset as handled. It reports whether it has.
+func (r *PreviewReconciler) finishReset(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
+	if gone, err := r.removeRestoreCopies(ctx, p, namespace); err != nil || !gone {
+		return false, err
+	}
 	if err := r.releaseSnapshots(ctx, p); err != nil {
-		return ctrl.Result{}, err
+		return false, err
 	}
 	p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
 	p.Status.Inventory = nil
 	p.Status.RestoredFrom = nil
 	apimeta.RemoveStatusCondition(&p.Status.Conditions, ConditionRestored)
-	provisioning(p, "reset")
-	return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+	return true, nil
 }
 
 // removeRestoreCopies deletes the VolumeSnapshots and VolumeSnapshotContents a preview was restored from, and reports whether they're gone.
@@ -418,12 +438,12 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 	done := true
 	restoring := !apimeta.IsStatusConditionTrue(p.Status.Conditions, ConditionRestored)
 	var snapshot *kuprav1alpha1.PreviewSnapshot
-	if restoring && p.Spec.RestoreFrom != nil {
+	if restoring {
+		// A restore that has started keeps its snapshot, even if restoreFrom changes. The hold records the choice even if its status write was lost.
 		name := ""
 		if p.Status.RestoredFrom != nil {
 			name = p.Status.RestoredFrom.Name
 		}
-		// The hold records the choice even if its status write was lost.
 		if name == "" {
 			held, err := r.heldSnapshot(ctx, p)
 			if err != nil {
@@ -431,23 +451,22 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 			}
 			name = held
 		}
-		if name == "" {
+		if name == "" && p.Spec.RestoreFrom != nil {
 			s, reason, message, err := r.chooseSnapshot(ctx, p)
 			if err != nil || reason != "" {
 				return nil, reason, message, err
 			}
 			name = s.Name
 		}
-		// Hold the snapshot before restoring anything from it.
-		s, reason, message, err := r.holdSnapshot(ctx, p, name)
-		if err != nil || reason != "" {
-			if reason == ReasonSnapshotNotFound && p.Status.RestoredFrom != nil {
-				message = fmt.Sprintf("PreviewSnapshot %s not found", name)
+		if name != "" {
+			// Hold the snapshot before restoring anything from it.
+			s, reason, message, err := r.holdSnapshot(ctx, p, name)
+			if err != nil || reason != "" {
+				return nil, reason, message, err
 			}
-			return nil, reason, message, err
+			p.Status.RestoredFrom = &meta.LocalObjectReference{Name: s.Name}
+			snapshot = s
 		}
-		p.Status.RestoredFrom = &meta.LocalObjectReference{Name: s.Name}
-		snapshot = s
 	}
 
 	var empty []string
@@ -464,11 +483,13 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 			Names:    names.ForResource(p.Name, p.UID, gk, obj.GetName()),
 			Labels:   map[string]string{LabelPreviewUID: string(p.UID)},
 		}
-		if live == nil && snapshot != nil {
-			if c := findCapture(snapshot, gk, obj.GetName()); c != nil {
-				req.From = &state.Source{Namespace: snapshot.Namespace, Data: c.Data}
-			} else {
+		if snapshot != nil {
+			c := findCapture(snapshot, gk, obj.GetName())
+			switch {
+			case c == nil:
 				empty = append(empty, obj.GetKind()+" "+obj.GetName())
+			case live == nil:
+				req.From = &state.Source{Namespace: snapshot.Namespace, Data: c.Data}
 			}
 		}
 		resp, err := r.runKind(ctx, func(observed state.Observed) state.Response {

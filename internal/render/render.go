@@ -286,16 +286,16 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 
 	seen := map[string]bool{}
 	for _, r := range a.resources {
-		settings := map[string]bool{}
-		for _, key := range settingAnnotations {
-			v, err := r.setting(key, activation)
-			if err != nil {
-				return nil, err
-			}
-			settings[key] = v
+		include, err := r.setting(IncludeAnnotation, activation)
+		if err != nil {
+			return nil, err
 		}
-		if !settings[IncludeAnnotation] {
+		if !include {
 			continue
+		}
+		isState, err := r.setting(StateAnnotation, activation)
+		if err != nil {
+			return nil, err
 		}
 
 		obj := runtime.DeepCopyJSONValue(r.object).(map[string]any)
@@ -319,7 +319,7 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 			return nil, fmt.Errorf("%s: more than one %s named %s", r.path, u.GetKind(), u.GetName())
 		}
 		seen[key] = true
-		result.Objects = append(result.Objects, Object{Unstructured: u, NotState: !settings[StateAnnotation]})
+		result.Objects = append(result.Objects, Object{Unstructured: u, NotState: !isState})
 	}
 	return result, nil
 }

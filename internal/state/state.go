@@ -51,6 +51,8 @@ type Response struct {
 	Delete []Ref
 	// Observe are objects to read for the next call.
 	Observe []Ref
+	// Waiting says what the kind is waiting for, such as a VolumeSnapshot error that the snapshot controller retries.
+	Waiting string
 	// Done is set when the restore or capture needs nothing more.
 	Done bool
 	// Capture is the result of a finished capture.

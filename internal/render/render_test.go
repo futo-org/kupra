@@ -468,6 +468,27 @@ template:
 		}
 	})
 
+	t.Run("state of an excluded resource", func(t *testing.T) {
+		// The include expression guards the state expression's map access.
+		result, err := render(t, `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+        annotations:
+          kupra.futo.tech/include: '"keep" in preview.labels'
+          kupra.futo.tech/state: preview.labels["keep"] == "true"
+`, `{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Objects) != 0 {
+			t.Errorf("objects = %v, want the claim excluded", result.Objects)
+		}
+	})
+
 	t.Run("state annotation from an expression", func(t *testing.T) {
 		_, err := render(t, `
 template:

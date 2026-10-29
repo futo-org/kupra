@@ -174,7 +174,8 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 	}
 }
 
-func TestPersistentVolumeClaimCaptureFails(t *testing.T) {
+// The snapshot controller retries after an error, so the capture waits, reporting it.
+func TestPersistentVolumeClaimCaptureWaitsOnErrors(t *testing.T) {
 	kind, _ := For(claimGK)
 	n := names.ForResource("snap", "uid", claimGK, "data")
 	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "preview", Name: n.Name("capture")}
@@ -186,8 +187,8 @@ metadata: {name: x, namespace: preview}
 status: {error: {message: no snapshot class}}
 `)
 	resp := kind.Capture(CaptureRequest{Resource: object(t, claim), Namespace: "app", Names: n, Observed: Observed{source: failed, target: nil}})
-	if !strings.Contains(resp.Failed, "no snapshot class") {
-		t.Errorf("failure = %q, want the VolumeSnapshot's error", resp.Failed)
+	if resp.Failed != "" || resp.Done || !strings.Contains(resp.Waiting, "no snapshot class") {
+		t.Errorf("response = %+v, want it waiting on the VolumeSnapshot's error", resp)
 	}
 }
 

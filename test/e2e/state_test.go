@@ -10,6 +10,7 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -160,6 +161,16 @@ func TestState(t *testing.T) {
 	if err := k8s.Delete(ctx, source); err != nil {
 		t.Fatal(err)
 	}
+	eventually(t, 5*time.Minute, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(source), &kuprav1alpha1.Preview{}); !apierrors.IsNotFound(err) {
+			return fmt.Errorf("Preview source still exists (%v)", err)
+		}
+		return nil
+	})
+	var before corev1.PersistentVolumeClaim
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: p.Status.Namespace, Name: "data"}, &before); err != nil {
+		t.Fatal(err)
+	}
 	if p.Annotations == nil {
 		p.Annotations = map[string]string{}
 	}
@@ -177,4 +188,11 @@ func TestState(t *testing.T) {
 		return nil
 	})
 	running("restored")
+	var after corev1.PersistentVolumeClaim
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: p.Status.Namespace, Name: "data"}, &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.UID == before.UID {
+		t.Error("the reset didn't recreate claim data")
+	}
 }

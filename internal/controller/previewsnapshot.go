@@ -54,7 +54,7 @@ func (r *PreviewSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return ctrl.Result{}, err
 		}
 	}
-	if s.Status.StartTime != nil {
+	if s.Status.StartTime != nil || s.Status.CompletionTime != nil {
 		return ctrl.Result{}, nil
 	}
 

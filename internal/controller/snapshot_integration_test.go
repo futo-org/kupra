@@ -404,6 +404,15 @@ template:
         resources:
           requests:
             storageExpr: parameters.size
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: extra
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
 `)
 
 	// A snapshot that captured the claim, as if kupra had taken it.
@@ -524,6 +533,26 @@ template:
 		t.Errorf("snapshot newer is held too: %v", newer.Finalizers)
 	}
 
+	// Removing restoreFrom doesn't end a restore that has started.
+	eventually(t, func() error {
+		got := getPreview(t, "restore-retries", "retry")
+		got.Spec.RestoreFrom = nil
+		return k8s.Update(ctx, got)
+	})
+	eventually(t, func() error {
+		got := getPreview(t, "restore-retries", "retry")
+		if got.Status.ObservedGeneration != got.Generation {
+			return fmt.Errorf("Preview retry hasn't seen its new generation")
+		}
+		return nil
+	})
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+string(p.UID)) {
+		t.Errorf("snapshot finalizers = %v after restoreFrom was removed, want the preview's hold", snap.Finalizers)
+	}
+
 	if err := k8s.Delete(ctx, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +562,8 @@ template:
 	}
 
 	bindClaim(t, p.Status.Namespace, "data")
-	waitForRestored(t, "restore-retries", "retry", metav1.ConditionTrue, "restored from PreviewSnapshot base")
+	bindClaim(t, p.Status.Namespace, "extra")
+	waitForRestored(t, "restore-retries", "retry", metav1.ConditionTrue, "restored from PreviewSnapshot base, without captures of PersistentVolumeClaim extra")
 	eventually(t, func() error {
 		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), &kuprav1alpha1.PreviewSnapshot{}); !apierrors.IsNotFound(err) {
 			return fmt.Errorf("PreviewSnapshot base still exists (%v)", err)
@@ -636,4 +666,37 @@ template:
 		return nil
 	})
 	waitForPhase(t, "going", "source", kuprav1alpha1.PreviewTerminating, controller.ReasonTerminating)
+}
+
+// A reset of a preview whose namespace is gone still clears its restore and releases its snapshot.
+func TestResetWithoutNamespace(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "resets", nil)
+	p := stalePreview("gone", "gone-uid")
+	p.Namespace = "resets"
+	p.Annotations = map[string]string{controller.AnnotationResetRequestedAt: "1"}
+	p.Status.RestoredFrom = &meta.LocalObjectReference{Name: "base"}
+	p.Status.Inventory = []kuprav1alpha1.InventoryEntry{{TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: "data"}, State: true}}
+	apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{Type: controller.ConditionRestored, Status: metav1.ConditionTrue, Reason: "Succeeded"})
+	snap := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "resets", Finalizers: []string{controller.RestoreFinalizerPrefix + "gone-uid"}},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "gone"}}},
+	}
+	if err := k8s.Create(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	done, err := staleReconciler(t, "", nil).FinishReset(ctx, p, "resets-gone-missing")
+	if err != nil || !done {
+		t.Fatalf("FinishReset = %v, %v; want done", done, err)
+	}
+	if p.Status.LastHandledResetAt != "1" || p.Status.RestoredFrom != nil || len(p.Status.Inventory) != 0 || apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored) != nil {
+		t.Errorf("status = %+v, want the reset handled and the restore cleared", p.Status)
+	}
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+"gone-uid") {
+		t.Errorf("snapshot finalizers = %v, want the hold released", snap.Finalizers)
+	}
 }
