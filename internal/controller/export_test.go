@@ -16,3 +16,7 @@ func (r *PreviewReconciler) ReconcileDelete(ctx context.Context, p *kuprav1alpha
 	_, cleanedUp, err := r.reconcileDelete(ctx, p)
 	return cleanedUp, err
 }
+
+func (r *PreviewReconciler) EnsureAccess(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
+	return r.ensureAccess(ctx, p, namespace)
+}
