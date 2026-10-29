@@ -1,14 +1,10 @@
-# Helm installs the CRDs in crds/ but never upgrades them. Apply them separately on upgrade, or use Flux's `crds: CreateReplace`.
-
 operator:
   replicas: 1
   image:
     repository: ghcr.io/futo-org/kupra-operator
-    # Defaults to the chart's appVersion.
     tag: ""
     pullPolicy: IfNotPresent
   imagePullSecrets: []
-  # Extra arguments, such as --zap-log-level=debug.
   extraArgs: []
   resources:
     requests:
@@ -23,8 +19,6 @@ operator:
   affinity: {}
   priorityClassName: ""
 
-# The spec of the PreviewPolicy named default, which other policies fall back to. Change the defaults here rather than by editing the object, which Helm would revert.
-# Lists replace the defaults rather than merging with them, and a field set to null is removed.
 defaultPolicy:
   apply:
     clusterRoleRef:

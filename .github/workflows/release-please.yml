@@ -17,9 +17,6 @@ permissions: {}
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Generate a token
         id: generate-token
@@ -35,40 +32,3 @@ jobs:
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.generate-token.outputs.token }}
-
-  publish:
-    name: Publish image and chart
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    env:
-      VERSION: ${{ needs.release-please.outputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup mise
-        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
-        with:
-          cache: false
-
-      - name: Log in to the container registry
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          echo "$GITHUB_TOKEN" | ko login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          echo "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-
-      - name: Publish the operator image
-        env:
-          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/kupra-operator
-        run: ko build --bare --tags "$VERSION" --image-label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" ./cmd/operator
-
-      - name: Publish the chart
-        run: |
-          helm package charts/kupra --version "$VERSION" --app-version "$VERSION" --destination "$RUNNER_TEMP"
-          helm push "$RUNNER_TEMP/kupra-$VERSION.tgz" "oci://ghcr.io/$GITHUB_REPOSITORY_OWNER/charts"
