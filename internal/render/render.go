@@ -161,7 +161,7 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 	var errs field.ErrorList
 	for _, key := range []string{"apiVersion", "kind", "metadata"} {
 		if _, ok := obj[key+exprSuffix]; ok {
-			errs = append(errs, field.Forbidden(fldPath.Child(key+exprSuffix), fmt.Sprintf("%s can't be given as an expression", key)))
+			errs = append(errs, field.Forbidden(fldPath.Child(key+exprSuffix), fmt.Sprintf("%s may not be an expression", key)))
 		}
 	}
 	for _, key := range []string{"apiVersion", "kind"} {
@@ -181,7 +181,7 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 	}
 	for _, key := range []string{"namespace", "namespace" + exprSuffix} {
 		if _, ok := metadata[key]; ok {
-			errs = append(errs, field.Forbidden(metaPath.Child(key), "kupra sets each resource's namespace"))
+			errs = append(errs, field.Forbidden(metaPath.Child(key), "may not be set"))
 		}
 	}
 
@@ -205,7 +205,7 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 				r.settings[key] = prg
 			}
 			if _, ok := annotations[key+exprSuffix]; ok {
-				errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(key+exprSuffix), fmt.Sprintf("%s already holds an expression, so give it as a plain annotation", key)))
+				errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(key+exprSuffix), "may not be set"))
 			}
 		}
 	}
@@ -230,7 +230,7 @@ func compileFields(e *env, value any, fldPath *field.Path, target []any, r *reso
 				continue
 			}
 			if _, ok := value[name]; ok {
-				errs = append(errs, field.Invalid(keyPath, expression, fmt.Sprintf("can't be given along with %s", name)))
+				errs = append(errs, field.Invalid(keyPath, expression, fmt.Sprintf("may not be set along with %s", name)))
 				continue
 			}
 			prg, err := e.compile(expression, nil)
@@ -306,7 +306,7 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 		// Settings are decided before rendering a resource, so they can't come from metadata.annotationsExpr.
 		for _, key := range settingAnnotations {
 			if _, ok := u.GetAnnotations()[key]; ok && r.settings[key] == nil {
-				return nil, fmt.Errorf("%s: %s can't be given by an expression", r.path.Child("metadata", "annotationsExpr"), key)
+				return nil, fmt.Errorf("%s: %s may not be set by an expression", r.path.Child("metadata", "annotationsExpr"), key)
 			}
 		}
 		if u.GetName() == "" {

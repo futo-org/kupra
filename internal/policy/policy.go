@@ -27,7 +27,7 @@ type NotFoundError struct {
 }
 
 func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("PreviewPolicy %s doesn't exist", e.Name)
+	return fmt.Sprintf("PreviewPolicy %s not found", e.Name)
 }
 
 // NoTemplateRoleError means neither a namespace's PreviewPolicy nor the default one names the ClusterRole templates are applied with.
@@ -37,9 +37,9 @@ type NoTemplateRoleError struct {
 
 func (e *NoTemplateRoleError) Error() string {
 	if e.Name == DefaultName {
-		return fmt.Sprintf("PreviewPolicy %s doesn't set apply.clusterRoleRef", e.Name)
+		return fmt.Sprintf("PreviewPolicy %s has no apply.clusterRoleRef", e.Name)
 	}
-	return fmt.Sprintf("PreviewPolicy %s doesn't set apply.clusterRoleRef, and neither does PreviewPolicy %s", e.Name, DefaultName)
+	return fmt.Sprintf("PreviewPolicies %s and %s have no apply.clusterRoleRef", e.Name, DefaultName)
 }
 
 // Resolve returns the settings for an app namespace's previews: its PreviewPolicy's, with the default PreviewPolicy's filled in for any field it leaves out.

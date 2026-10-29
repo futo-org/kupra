@@ -166,7 +166,7 @@ template:
       data: {}
       dataExpr: '{}'
 `,
-			want: `spec.template.resources[0].dataExpr: Invalid value: "{}": can't be given along with data`,
+			want: `spec.template.resources[0].dataExpr: Invalid value: "{}": may not be set along with data`,
 		},
 		{
 			name: "invalid expression",
@@ -242,7 +242,7 @@ template:
         annotations:
           kupra.futo.tech/includeExpr: '"true"'
 `,
-			want: "kupra.futo.tech/include already holds an expression, so give it as a plain annotation",
+			want: "metadata.annotations[kupra.futo.tech/includeExpr]: Forbidden: may not be set",
 		},
 		{
 			name: "namespace",
@@ -253,7 +253,7 @@ template:
       kind: ConfigMap
       metadata: {name: config, namespace: other}
 `,
-			want: "spec.template.resources[0].metadata.namespace: Forbidden: kupra sets each resource's namespace",
+			want: "spec.template.resources[0].metadata.namespace: Forbidden: may not be set",
 		},
 		{
 			name: "kind as an expression",
@@ -264,7 +264,7 @@ template:
       kindExpr: '"ConfigMap"'
       metadata: {name: config}
 `,
-			want: "spec.template.resources[0].kindExpr: Forbidden: kind can't be given as an expression",
+			want: "spec.template.resources[0].kindExpr: Forbidden: kind may not be an expression",
 		},
 		{
 			name: "metadata as an expression",
@@ -275,7 +275,7 @@ template:
       kind: ConfigMap
       metadataExpr: '{"name": "config"}'
 `,
-			want: "spec.template.resources[0].metadataExpr: Forbidden: metadata can't be given as an expression",
+			want: "spec.template.resources[0].metadataExpr: Forbidden: metadata may not be an expression",
 		},
 		{
 			name: "missing name and kind",
@@ -478,7 +478,7 @@ template:
         name: cache
         annotationsExpr: '{"kupra.futo.tech/state": "false"}'
 `, `{}`)
-		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/state can't be given by an expression") {
+		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/state may not be set by an expression") {
 			t.Errorf("error = %v, want the state annotation refused", err)
 		}
 	})
@@ -529,7 +529,7 @@ template:
         name: config
         annotationsExpr: '{"kupra.futo.tech/include": "false"}'
 `, `{}`)
-		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/include can't be given by an expression") {
+		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/include may not be set by an expression") {
 			t.Errorf("error = %v, want it to say the include can't come from an expression", err)
 		}
 	})
@@ -567,8 +567,8 @@ template:
         name: config
       binaryDataExpr: '{"key": b"value"}'
 `, `{}`)
-		if err == nil || !strings.Contains(err.Error(), "convert it, for example with string()") {
-			t.Errorf("error = %v, want it to say bytes need converting", err)
+		if err == nil || !strings.Contains(err.Error(), "unsupported type bytes") {
+			t.Errorf("error = %v, want bytes refused", err)
 		}
 	})
 

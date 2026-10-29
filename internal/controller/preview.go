@@ -186,13 +186,13 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	var app kuprav1alpha1.PreviewApp
 	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.AppRef.Name}, &app); err != nil {
 		if apierrors.IsNotFound(err) {
-			pending(p, ReasonAppNotFound, fmt.Sprintf("PreviewApp %s doesn't exist", p.Spec.AppRef.Name))
+			pending(p, ReasonAppNotFound, fmt.Sprintf("PreviewApp %s not found", p.Spec.AppRef.Name))
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 	if c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
-		message := fmt.Sprintf("PreviewApp %s hasn't been checked yet", app.Name)
+		message := fmt.Sprintf("waiting for PreviewApp %s to be checked", app.Name)
 		if c != nil && c.ObservedGeneration == app.Generation {
 			message = fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message)
 		}
@@ -366,9 +366,9 @@ func (r *PreviewReconciler) ensureNamespace(ctx context.Context, p *kuprav1alpha
 	case err != nil:
 		return "", "", err
 	case existing.Annotations[AnnotationPreviewUID] != string(p.UID):
-		return ReasonNamespaceConflict, fmt.Sprintf("namespace %s already exists, and doesn't belong to this Preview", name), nil
+		return ReasonNamespaceConflict, fmt.Sprintf("namespace %s already exists", name), nil
 	case !existing.DeletionTimestamp.IsZero():
-		return ReasonNamespaceTerminating, fmt.Sprintf("namespace %s is still being deleted", name), nil
+		return ReasonNamespaceTerminating, fmt.Sprintf("namespace %s is being deleted", name), nil
 	}
 
 	labels := map[string]string{}

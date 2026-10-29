@@ -104,8 +104,8 @@ func TestFieldSchemaAndFits(t *testing.T) {
 		{path: []any{"spec", "template", "spec", "containers", 0, "ports", 0, "targetPort"}, t: cel.IntType, fits: true},
 		{path: []any{"spec", "template", "spec", "containers", 0, "ports", 0, "targetPort"}, t: cel.StringType, fits: true},
 		{path: []any{"spec", "template", "spec", "containers", 0, "ports", 0, "targetPort"}, t: cel.BoolType, fits: false},
-		{path: []any{"spec", "template", "spec", "containers", 0, "imag"}, wantErr: "there's no field imag"},
-		{path: []any{"spec", "templat", "spec"}, wantErr: "there's no field templat at spec.templat"},
+		{path: []any{"spec", "template", "spec", "containers", 0, "imag"}, wantErr: `unknown field "imag"`},
+		{path: []any{"spec", "templat", "spec"}, wantErr: `unknown field "templat"`},
 	} {
 		fs, err := fieldSchema(s, tc.path)
 		if tc.wantErr != "" {
@@ -189,9 +189,9 @@ template:
 	got := c.Template(app, "kupra-preview-template", rules).ToAggregate().Error()
 	for _, want := range []string{
 		`spec.template.resources[0].spec.replicasExpr: Invalid value: "string": must evaluate to an integer`,
-		`spec.template.resources[0].spec.template.spec.containers[0].imagExpr: Invalid value: "imag": there's no field imag`,
+		`spec.template.resources[0].spec.template.spec.containers[0].imagExpr: Invalid value: "imag": unknown field "imag"`,
 		`spec.template.resources[1].kind: Forbidden: the policy's ClusterRole kupra-preview-template doesn't allow get, create, patch, delete on configmaps`,
-		`spec.template.resources[2].kind: Forbidden: ClusterRole is cluster-scoped, and templates can only contain namespaced resources`,
+		`spec.template.resources[2].kind: Forbidden: ClusterRole is cluster-scoped`,
 		`spec.template.resources[3].kind: Invalid value: "Widget": no matches for kind "Widget" in version "example.com/v1"`,
 		`spec.template.resources[4].spec.dataSourceRef: Forbidden: may not be set on a claim that's state`,
 	} {
