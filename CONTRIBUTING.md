@@ -45,4 +45,4 @@ An ADR stays Proposed until it's implemented. The PR that finishes the last part
 
 ## Releases
 
-release-please opens a release PR from the conventional commits on `main`. Merging it tags the release, and publishes the operator's image to `ghcr.io/futo-org/kupra-operator` and the chart to `oci://ghcr.io/futo-org/charts/kupra`, all with the same version.
+release-please opens a release PR from the conventional commits on `main`. Merging it tags the release, and publishes the operator's image to `ghcr.io/futo-org/kupra-operator` and the chart to `oci://ghcr.io/futo-org/charts/kupra`, all with the same version. [Installing kupra](docs/install.md) covers installs and upgrades.
