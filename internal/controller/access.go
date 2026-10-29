@@ -61,7 +61,8 @@ func (r *PreviewReconciler) ensureAccess(ctx context.Context, p *kuprav1alpha1.P
 	}
 
 	var ns corev1.Namespace
-	switch err := r.Get(ctx, client.ObjectKey{Name: namespace}, &ns); {
+	// Read live, since a stale namespace would let the owners into one that replaced it.
+	switch err := r.APIReader.Get(ctx, client.ObjectKey{Name: namespace}, &ns); {
 	case apierrors.IsNotFound(err):
 		return false, nil
 	case err != nil:
