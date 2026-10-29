@@ -123,6 +123,73 @@ spec:
                   Like environment variables, they're strings, whatever the parameter's
                   type.
                 type: object
+              restoreFrom:
+                description: RestoreFrom chooses a snapshot for the preview's state
+                  to start from. Without it, state starts empty. It's only used when
+                  the preview starts, or is reset.
+                properties:
+                  snapshotRef:
+                    description: SnapshotRef names a PreviewSnapshot in the preview's
+                      namespace.
+                    properties:
+                      name:
+                        description: Name of the referent.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  snapshotSelector:
+                    description: SnapshotSelector selects the newest ready PreviewSnapshot
+                      in the preview's namespace with matching labels.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of snapshotRef and snapshotSelector must be
+                    set
+                  rule: has(self.snapshotRef) != has(self.snapshotSelector)
             required:
             - appRef
             type: object
@@ -219,6 +286,10 @@ spec:
                   x-kubernetes-map-type: atomic
                 type: array
                 x-kubernetes-list-type: atomic
+              lastHandledResetAt:
+                description: LastHandledResetAt is the last kupra.futo.tech/reset-requested-at
+                  value kupra handled.
+                type: string
               links:
                 items:
                   properties:
@@ -254,6 +325,16 @@ spec:
                 - Terminating
                 - Failed
                 type: string
+              restoredFrom:
+                description: RestoredFrom is the PreviewSnapshot the preview's state
+                  started from.
+                properties:
+                  name:
+                    description: Name of the referent.
+                    type: string
+                required:
+                - name
+                type: object
             type: object
         required:
         - spec

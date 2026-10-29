@@ -26,6 +26,20 @@ type PreviewSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self.all(s, !has(s.apiGroup) || s.apiGroup == '' || (s.kind != 'ServiceAccount' && s.apiGroup == 'rbac.authorization.k8s.io'))",message="apiGroup must be rbac.authorization.k8s.io for users and groups, and empty for service accounts"
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners can't be system users or groups, such as system:authenticated"
 	Owners []rbacv1.Subject `json:"owners,omitempty"`
+
+	// RestoreFrom chooses a snapshot for the preview's state to start from. Without it, state starts empty. It's only used when the preview starts, or is reset.
+	// +optional
+	RestoreFrom *RestoreSource `json:"restoreFrom,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.snapshotRef) != has(self.snapshotSelector)",message="exactly one of snapshotRef and snapshotSelector must be set"
+type RestoreSource struct {
+	// SnapshotRef names a PreviewSnapshot in the preview's namespace.
+	// +optional
+	SnapshotRef *meta.LocalObjectReference `json:"snapshotRef,omitempty"`
+	// SnapshotSelector selects the newest ready PreviewSnapshot in the preview's namespace with matching labels.
+	// +optional
+	SnapshotSelector *metav1.LabelSelector `json:"snapshotSelector,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Pending;Provisioning;Starting;Running;Stopping;Stopped;Terminating;Failed
@@ -53,6 +67,14 @@ type PreviewStatus struct {
 	// Namespace is the namespace the preview's resources run in.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
+
+	// RestoredFrom is the PreviewSnapshot the preview's state started from.
+	// +optional
+	RestoredFrom *meta.LocalObjectReference `json:"restoredFrom,omitempty"`
+
+	// LastHandledResetAt is the last kupra.futo.tech/reset-requested-at value kupra handled.
+	// +optional
+	LastHandledResetAt string `json:"lastHandledResetAt,omitempty"`
 
 	// +optional
 	// +listType=map

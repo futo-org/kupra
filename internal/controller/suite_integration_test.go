@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,7 +45,7 @@ func TestMain(m *testing.M) {
 func run(m *testing.M) int {
 	ctrl.SetLogger(logr.Discard())
 	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "charts", "kupra", "crds")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "charts", "kupra", "crds"), filepath.Join("testdata", "crds")},
 		ErrorIfCRDPathMissing: true,
 	}
 	cfg, err := env.Start()
@@ -62,6 +63,7 @@ func run(m *testing.M) int {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(kuprav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(snapshotv1.AddToScheme(scheme))
 
 	k8s, err = client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {

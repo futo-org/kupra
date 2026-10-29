@@ -17,6 +17,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.source.previewRef.name
+      name: Preview
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -49,9 +52,101 @@ spec:
           metadata:
             type: object
           spec:
+            properties:
+              mode:
+                default: Offline
+                description: Mode chooses how the snapshot is kept consistent. Offline
+                  stops the preview's app while its state is captured. Online captures
+                  while it runs, so captures may not line up with each other.
+                enum:
+                - Offline
+                - Online
+                type: string
+                x-kubernetes-validations:
+                - message: mode is immutable
+                  rule: self == oldSelf
+              source:
+                properties:
+                  previewRef:
+                    description: PreviewRef names the Preview to capture, in the snapshot's
+                      namespace.
+                    properties:
+                      name:
+                        description: Name of the referent.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - previewRef
+                type: object
+                x-kubernetes-validations:
+                - message: source is immutable
+                  rule: self == oldSelf
+            required:
+            - source
             type: object
           status:
             properties:
+              appRef:
+                description: AppRef is the PreviewApp the source preview ran.
+                properties:
+                  name:
+                    description: Name of the referent.
+                    type: string
+                required:
+                - name
+                type: object
+              captures:
+                description: Captures are the state resources captured, matched by
+                  name and kind when restoring.
+                items:
+                  description: Capture is a captured state resource.
+                  properties:
+                    data:
+                      description: Data are the objects in the snapshot's namespace
+                        that hold the captured data, such as VolumeSnapshots.
+                      items:
+                        description: |-
+                          TypedLocalObjectReference contains enough information to let you locate the
+                          typed referenced object inside the same namespace.
+                        properties:
+                          apiGroup:
+                            description: |-
+                              APIGroup is the group for the resource being referenced.
+                              If APIGroup is not specified, the specified Kind must be in the core API group.
+                              For any other third-party types, APIGroup is required.
+                            type: string
+                          kind:
+                            description: Kind is the type of resource being referenced
+                            type: string
+                          name:
+                            description: Name is the name of resource being referenced
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    group:
+                      type: string
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - data
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              completionTime:
+                description: CompletionTime is when capturing succeeded or failed.
+                format: date-time
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -114,6 +209,12 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              parameters:
+                additionalProperties:
+                  type: string
+                description: Parameters are the source preview's parameters when it
+                  was captured.
+                type: object
               phase:
                 description: Phase summarises the state for display. Tools should
                   use conditions instead.
@@ -125,7 +226,13 @@ spec:
                 type: string
               readyToUse:
                 type: boolean
+              startTime:
+                description: StartTime is when kupra started capturing.
+                format: date-time
+                type: string
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true
