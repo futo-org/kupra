@@ -42,7 +42,7 @@ k apply --server-side -f charts/kupra/crds
 k wait --for condition=Established --timeout=60s -f charts/kupra/crds
 
 arch="$(go env GOARCH)"
-image="$(KO_DOCKER_REPO=kind.local/kupra-operator KIND_CLUSTER_NAME="$cluster" GOARCH="$arch" \
+image="$(KO_DOCKER_REPO=kind.local/kupra-operator KIND_CLUSTER_NAME="$cluster" \
   ko build --bare --platform "linux/$arch" ./cmd/operator)"
 helm upgrade --install kupra charts/kupra --kube-context "$context" \
   --namespace kupra-system --create-namespace --wait --timeout 180s \
