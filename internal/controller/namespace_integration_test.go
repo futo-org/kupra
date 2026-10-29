@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -105,22 +106,7 @@ func TestNamespaceReplacedSinceRead(t *testing.T) {
 			name := controller.PreviewNamespaceName(p.Namespace, p.Name)
 			// A namespace the preview once had, which has since been replaced by another one of the same name.
 			stale := createOwnedNamespace(t, name, "mine")
-			if err := k8s.Delete(ctx, stale); err != nil {
-				t.Fatal(err)
-			}
-			eventually(t, func() error {
-				// envtest has no namespace controller, so finish the deletion by hand.
-				var ns corev1.Namespace
-				if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &ns); apierrors.IsNotFound(err) {
-					return nil
-				} else if err != nil {
-					return err
-				}
-				ns.Spec.Finalizers = nil
-				return k8s.SubResource("finalize").Update(ctx, &ns)
-			})
-			stale.DeletionTimestamp = nil
-			createOwnedNamespace(t, name, "other")
+			replaceNamespace(t, name, "other")
 
 			r := staleReconciler(t, name, stale)
 			if err := tc.run(r, p, name); err == nil {
@@ -137,5 +123,49 @@ func TestNamespaceReplacedSinceRead(t *testing.T) {
 				t.Errorf("namespace belongs to %q, want it left to other", uid)
 			}
 		})
+	}
+}
+
+// replaceNamespace deletes a namespace, and creates another of the same name, owned by another preview.
+func replaceNamespace(t *testing.T, name string, uid types.UID) {
+	t.Helper()
+	ctx := context.Background()
+	if err := k8s.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		// envtest has no namespace controller, so finish the deletion by hand.
+		var ns corev1.Namespace
+		if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &ns); apierrors.IsNotFound(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		ns.Spec.Finalizers = nil
+		return k8s.SubResource("finalize").Update(ctx, &ns)
+	})
+	createOwnedNamespace(t, name, uid)
+}
+
+func TestAccessToReplacedNamespace(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "stale", nil)
+	p := stalePreview("replaced-access", "mine")
+	p.Annotations = map[string]string{controller.AnnotationCreatedBy: "alice"}
+	name := controller.PreviewNamespaceName(p.Namespace, p.Name)
+	stale := createOwnedNamespace(t, name, "mine")
+	replaceNamespace(t, name, "other")
+
+	r := staleReconciler(t, name, stale)
+	exists, err := r.EnsureAccess(ctx, p, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Error("the replacement namespace is taken for the preview's")
+	}
+	var binding rbacv1.RoleBinding
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: name, Name: "kupra-access"}, &binding); !apierrors.IsNotFound(err) {
+		t.Errorf("kupra-access in the replacement namespace: %v, %+v; want none", err, binding.Subjects)
 	}
 }
