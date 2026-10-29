@@ -20,3 +20,8 @@ func (r *PreviewReconciler) ReconcileDelete(ctx context.Context, p *kuprav1alpha
 func (r *PreviewReconciler) EnsureAccess(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
 	return r.ensureAccess(ctx, p, namespace)
 }
+
+func (r *PreviewReconciler) HoldSnapshot(ctx context.Context, p *kuprav1alpha1.Preview, name string) (string, error) {
+	_, reason, _, err := r.holdSnapshot(ctx, p, name)
+	return reason, err
+}

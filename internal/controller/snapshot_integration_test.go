@@ -5,6 +5,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -476,6 +477,12 @@ template:
 
 	// While the claim is provisioning, the snapshot it restores from is held.
 	waitForRestored(t, "restore-retries", "retry", metav1.ConditionFalse, "PersistentVolumeClaim data")
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+string(p.UID)) {
+		t.Errorf("snapshot finalizers = %v, want the preview's hold", snap.Finalizers)
+	}
 	if err := k8s.Delete(ctx, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -492,4 +499,51 @@ template:
 		}
 		return nil
 	})
+}
+
+// A snapshot that starts being deleted after a preview chose it, but before the preview holds it, isn't restored from.
+func TestHoldSnapshotBeingDeleted(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "holds", nil)
+	snap := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "holds", Finalizers: []string{"test.kupra.futo.tech/keep"}},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "gone"}}},
+	}
+	if err := k8s.Create(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+			return err
+		}
+		snap.Status = kuprav1alpha1.PreviewSnapshotStatus{StartTime: &now, CompletionTime: &now, Phase: kuprav1alpha1.PreviewSnapshotSucceeded, ReadyToUse: true}
+		return k8s.Status().Update(ctx, snap)
+	})
+	if err := k8s.Delete(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err == nil {
+			snap.Finalizers = nil
+			_ = k8s.Update(ctx, snap)
+		}
+	})
+
+	p := stalePreview("chooser", "chooser-uid")
+	p.Namespace = "holds"
+	r := staleReconciler(t, "", nil)
+	reason, err := r.HoldSnapshot(ctx, p, "base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason != controller.ReasonSnapshotNotReady {
+		t.Errorf("reason = %q, want %s", reason, controller.ReasonSnapshotNotReady)
+	}
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+"chooser-uid") {
+		t.Errorf("snapshot finalizers = %v, want no hold on a snapshot being deleted", snap.Finalizers)
+	}
 }

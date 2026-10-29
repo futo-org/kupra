@@ -43,6 +43,14 @@ func (c cluster) step(resp Response) Observed {
 			for k, v := range spec {
 				_ = unstructured.SetNestedField(merged.Object, v, "spec", k)
 			}
+			labels := merged.GetLabels()
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			for k, v := range obj.GetLabels() {
+				labels[k] = v
+			}
+			merged.SetLabels(labels)
 			c[ref] = merged
 			continue
 		}
@@ -274,5 +282,45 @@ func TestPersistentVolumeClaimRestoreFromMissingSnapshot(t *testing.T) {
 	})
 	if !strings.Contains(resp.Failed, "doesn't exist") {
 		t.Errorf("failure = %q, want the missing VolumeSnapshot reported", resp.Failed)
+	}
+}
+
+// A VolumeSnapshotClass can already retain what it snapshots. The source's content is still labelled, so it can be cleaned up with the PreviewSnapshot.
+func TestPersistentVolumeClaimCaptureWithRetainClass(t *testing.T) {
+	kind, _ := For(claimGK)
+	names := NewNames("snap", "uid", claimGK, "data")
+	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "preview", Name: names.Name("capture")}
+	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: names.Name("data")}
+	contentRef := Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: "content-1"}
+	c := cluster{
+		source: object(t, `
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata: {name: x, namespace: preview}
+status: {boundVolumeSnapshotContentName: content-1, readyToUse: true}
+`),
+		contentRef: object(t, `
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotContent
+metadata: {name: content-1}
+spec:
+  deletionPolicy: Retain
+  driver: hostpath.csi.k8s.io
+  source: {volumeHandle: vol-1}
+  volumeSnapshotRef: {namespace: preview, name: x}
+status: {snapshotHandle: handle-1, readyToUse: true}
+`),
+	}
+	req := CaptureRequest{
+		Resource:  object(t, claim),
+		Namespace: "app",
+		Names:     names,
+		Labels:    map[string]string{"kupra.futo.tech/snapshot-uid": "uid"},
+		Observed:  Observed{source: c[source], target: nil, contentRef: c[contentRef]},
+	}
+	resp := kind.Capture(req)
+	c.step(resp)
+	if got := c[contentRef].GetLabels()["kupra.futo.tech/snapshot-uid"]; got != "uid" {
+		t.Errorf("source content's label = %q, want it labelled even though it was already retained", got)
 	}
 }

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -139,24 +140,45 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 	return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, s, patch))
 }
 
-// holders lists what keeps a snapshot from being deleted: a capture of it that's running, previews that name it, and previews still restoring from it.
+// holders lists what keeps a snapshot from being deleted: a capture of it that's running, previews that name it, and previews restoring from it, which hold it with finalizers of their own. Previews are read live, so a deletion doesn't go ahead on a stale view. Restore finalizers whose preview no longer exists are removed.
 func (r *PreviewSnapshotReconciler) holders(ctx context.Context, s *kuprav1alpha1.PreviewSnapshot) ([]string, error) {
 	var holders []string
 	if s.Status.StartTime != nil && s.Status.CompletionTime == nil {
 		holders = append(holders, "its capture, which is running")
 	}
 	var previews kuprav1alpha1.PreviewList
-	if err := r.List(ctx, &previews, client.InNamespace(s.Namespace)); err != nil {
+	if err := r.APIReader.List(ctx, &previews, client.InNamespace(s.Namespace)); err != nil {
 		return nil, err
 	}
+	byUID := map[string]string{}
 	for _, p := range previews.Items {
-		if !p.DeletionTimestamp.IsZero() {
+		byUID[string(p.UID)] = p.Name
+		if p.DeletionTimestamp.IsZero() && p.Spec.RestoreFrom != nil && p.Spec.RestoreFrom.SnapshotRef != nil && p.Spec.RestoreFrom.SnapshotRef.Name == s.Name {
+			holders = append(holders, "Preview "+p.Name)
+		}
+	}
+	var orphans []string
+	for _, f := range s.Finalizers {
+		uid, ok := strings.CutPrefix(f, RestoreFinalizerPrefix)
+		if !ok {
 			continue
 		}
-		named := p.Spec.RestoreFrom != nil && p.Spec.RestoreFrom.SnapshotRef != nil && p.Spec.RestoreFrom.SnapshotRef.Name == s.Name
-		restoring := p.Status.RestoredFrom != nil && p.Status.RestoredFrom.Name == s.Name && !apimeta.IsStatusConditionTrue(p.Status.Conditions, ConditionRestored)
-		if named || restoring {
-			holders = append(holders, "Preview "+p.Name)
+		if name, ok := byUID[uid]; ok {
+			holder := "Preview " + name
+			if !slices.Contains(holders, holder) {
+				holders = append(holders, holder)
+			}
+			continue
+		}
+		orphans = append(orphans, f)
+	}
+	if len(orphans) > 0 {
+		patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		for _, f := range orphans {
+			controllerutil.RemoveFinalizer(s, f)
+		}
+		if err := r.Patch(ctx, s, patch); err != nil {
+			return nil, err
 		}
 	}
 	return holders, nil

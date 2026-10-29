@@ -111,7 +111,11 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		result, err = r.reconcile(ctx, &preview)
 	}
-	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFrom(before)); patchErr != nil {
+	// The lock makes a reconciliation that started from a stale read fail here and start again, rather than write stale status, such as a condition another reconciliation has since changed.
+	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
+		if apierrors.IsConflict(patchErr) && err == nil {
+			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+		}
 		return ctrl.Result{}, errors.Join(err, patchErr)
 	}
 	if cleanedUp {
@@ -594,6 +598,11 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 		}
 		result, err := r.reconcileCapture(ctx, p, s, applier, nsName)
 		return result, false, err
+	}
+
+	// A preview that's going away no longer needs the snapshot it restores from.
+	if err := r.releaseSnapshots(ctx, p, ""); err != nil {
+		return ctrl.Result{}, false, err
 	}
 
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating

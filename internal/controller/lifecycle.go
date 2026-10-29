@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/state"
@@ -81,11 +82,11 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	if err != nil {
 		return false, err
 	}
-	i := slices.IndexFunc(snapshots, func(s kuprav1alpha1.PreviewSnapshot) bool { return s.DeletionTimestamp.IsZero() })
-	if i < 0 {
+	s := nextCapture(snapshots)
+	if s == nil {
 		return false, nil
 	}
-	s := &snapshots[i]
+	// The optimistic lock fails this if the snapshot has changed since it was read, for example by its finalizer being removed for deletion.
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	now := metav1.Now()
 	s.Status.StartTime = &now
@@ -95,6 +96,15 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonCapturing, "")
 	setCondition(&s.Status.Conditions, s.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonCapturing, fmt.Sprintf("capturing Preview %s", p.Name))
 	return true, client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
+}
+
+// nextCapture returns the snapshot whose capture starts next: the oldest that isn't being deleted. It has to carry kupra's finalizer first, so that once its capture has started, deleting it waits for the capture to finish. Until it does, nothing starts, so captures keep their order.
+func nextCapture(snapshots []kuprav1alpha1.PreviewSnapshot) *kuprav1alpha1.PreviewSnapshot {
+	i := slices.IndexFunc(snapshots, func(s kuprav1alpha1.PreviewSnapshot) bool { return s.DeletionTimestamp.IsZero() })
+	if i < 0 || !controllerutil.ContainsFinalizer(&snapshots[i], Finalizer) {
+		return nil
+	}
+	return &snapshots[i]
 }
 
 // reconcileCapture continues a running capture of a preview. Template changes are held back meanwhile, so the snapshot matches the parameters it records, and an Offline capture keeps the app stopped.
@@ -201,6 +211,9 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 	if !gone {
 		stopping(p, ReasonResetting, "removing the app and its state")
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
+	}
+	if err := r.releaseSnapshots(ctx, p, ""); err != nil {
+		return ctrl.Result{}, err
 	}
 	p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
 	p.Status.Inventory = nil
@@ -396,23 +409,29 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 	restoring := !apimeta.IsStatusConditionTrue(p.Status.Conditions, ConditionRestored)
 	var snapshot *kuprav1alpha1.PreviewSnapshot
 	if restoring && p.Spec.RestoreFrom != nil {
-		if p.Status.RestoredFrom == nil {
+		name := ""
+		if p.Status.RestoredFrom != nil {
+			name = p.Status.RestoredFrom.Name
+		} else {
 			s, reason, message, err := r.chooseSnapshot(ctx, p)
 			if err != nil || reason != "" {
 				return nil, reason, message, err
 			}
-			p.Status.RestoredFrom = &meta.LocalObjectReference{Name: s.Name}
-			snapshot = s
-		} else {
-			var s kuprav1alpha1.PreviewSnapshot
-			if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Status.RestoredFrom.Name}, &s); err != nil {
-				if apierrors.IsNotFound(err) {
-					return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s, which the preview restores from, was deleted; reset the preview to start again", p.Status.RestoredFrom.Name), nil
-				}
-				return nil, "", "", err
-			}
-			snapshot = &s
+			name = s.Name
 		}
+		// The snapshot is held before anything is restored from it, and its choice is only recorded once it is.
+		s, reason, message, err := r.holdSnapshot(ctx, p, name)
+		if err != nil || reason != "" {
+			if reason == ReasonSnapshotNotFound && p.Status.RestoredFrom != nil {
+				message = fmt.Sprintf("PreviewSnapshot %s, which the preview restores from, was deleted; reset the preview to start again", name)
+			}
+			return nil, reason, message, err
+		}
+		if err := r.releaseSnapshots(ctx, p, s.Name); err != nil {
+			return nil, "", "", err
+		}
+		p.Status.RestoredFrom = &meta.LocalObjectReference{Name: s.Name}
+		snapshot = s
 	}
 
 	var empty []string
@@ -494,6 +513,62 @@ func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.
 			return true, nil
 		}
 	}
+	// Restored state no longer needs the snapshot.
+	if err := r.releaseSnapshots(ctx, p, ""); err != nil {
+		return false, err
+	}
 	setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionTrue, meta.SucceededReason, plan.summary)
 	return false, nil
+}
+
+// RestoreFinalizerPrefix, followed by a Preview's UID, keeps a PreviewSnapshot while that preview restores from it.
+const RestoreFinalizerPrefix = "kupra.futo.tech/restore-"
+
+func restoreFinalizer(p *kuprav1alpha1.Preview) string {
+	return RestoreFinalizerPrefix + string(p.UID)
+}
+
+// holdSnapshot keeps a snapshot from being deleted while the preview restores from it, with a finalizer of the preview's own. Kubernetes doesn't let finalizers be added to an object that's being deleted, and the write fails if the snapshot has changed since kupra read it live, so the hold and a deletion can't both succeed. It returns a reason when the snapshot can't be used.
+func (r *PreviewReconciler) holdSnapshot(ctx context.Context, p *kuprav1alpha1.Preview, name string) (*kuprav1alpha1.PreviewSnapshot, string, string, error) {
+	var s kuprav1alpha1.PreviewSnapshot
+	if err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: name}, &s); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s doesn't exist", name), nil
+		}
+		return nil, "", "", err
+	}
+	finalizer := restoreFinalizer(p)
+	if controllerutil.ContainsFinalizer(&s, finalizer) {
+		return &s, "", "", nil
+	}
+	if !s.Status.ReadyToUse || !s.DeletionTimestamp.IsZero() {
+		return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s isn't ready to use", name), nil
+	}
+	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	controllerutil.AddFinalizer(&s, finalizer)
+	if err := r.Patch(ctx, &s, patch); err != nil {
+		return nil, "", "", err
+	}
+	return &s, "", "", nil
+}
+
+// releaseSnapshots removes the preview's hold from the snapshots in its namespace, apart from keep.
+func (r *PreviewReconciler) releaseSnapshots(ctx context.Context, p *kuprav1alpha1.Preview, keep string) error {
+	var list kuprav1alpha1.PreviewSnapshotList
+	if err := r.APIReader.List(ctx, &list, client.InNamespace(p.Namespace)); err != nil {
+		return err
+	}
+	finalizer := restoreFinalizer(p)
+	for i := range list.Items {
+		s := &list.Items[i]
+		if s.Name == keep || !controllerutil.ContainsFinalizer(s, finalizer) {
+			continue
+		}
+		patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		controllerutil.RemoveFinalizer(s, finalizer)
+		if err := client.IgnoreNotFound(r.Patch(ctx, s, patch)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

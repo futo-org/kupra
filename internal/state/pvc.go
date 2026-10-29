@@ -160,9 +160,9 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	if err := fromUnstructured(contentObj, &content); err != nil {
 		return Response{Failed: err.Error()}
 	}
-	// The source's content has to keep the storage snapshot when the source is deleted, or the preview's namespace is.
-	if content.Spec.DeletionPolicy != snapshotv1.VolumeSnapshotContentRetain {
-		// Only the deletion policy is kupra's to set.
+	// The source's content has to keep the storage snapshot when the source is deleted, or the preview's namespace is. It's labelled whatever its policy was, since it's left behind and has to be found to be cleaned up.
+	if content.Spec.DeletionPolicy != snapshotv1.VolumeSnapshotContentRetain || !hasLabels(content.Labels, req.Labels) {
+		// Only the deletion policy and the labels are kupra's to set.
 		u := &unstructured.Unstructured{Object: map[string]any{
 			"metadata": map[string]any{"name": content.Name, "labels": stringMap(req.Labels)},
 			"spec":     map[string]any{"deletionPolicy": string(snapshotv1.VolumeSnapshotContentRetain)},
@@ -279,4 +279,13 @@ func snapshotHandle(content *snapshotv1.VolumeSnapshotContent) *string {
 func (persistentVolumeClaim) Restored(live *unstructured.Unstructured) bool {
 	phase, _, _ := unstructured.NestedString(live.Object, "status", "phase")
 	return phase == string(corev1.ClaimBound)
+}
+
+func hasLabels(labels, want map[string]string) bool {
+	for k, v := range want {
+		if labels[k] != v {
+			return false
+		}
+	}
+	return true
 }
