@@ -206,6 +206,34 @@ template:
 		}
 	})
 
+	t.Run("deleted during a capture", func(t *testing.T) {
+		doomed := &kuprav1alpha1.PreviewSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: "doomed", Namespace: "snapshots"},
+			Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "source"}}},
+		}
+		if err := k8s.Create(ctx, doomed); err != nil {
+			t.Fatal(err)
+		}
+		captured := waitForVolumeSnapshot(t, sourceNS, controller.LabelSnapshotUID, string(doomed.UID))
+		if err := k8s.Delete(ctx, doomed); err != nil {
+			t.Fatal(err)
+		}
+		// The capture that has started still finishes, with the app stopped until it does.
+		if p := getPreview(t, "snapshots", "source"); p.Status.Phase != kuprav1alpha1.PreviewStopped {
+			t.Errorf("source preview phase = %s, want Stopped", p.Status.Phase)
+		}
+		takeSnapshot(t, captured, "handle-doomed")
+		moved := waitForVolumeSnapshot(t, "snapshots", controller.LabelSnapshotUID, string(doomed.UID))
+		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
+		eventually(t, func() error {
+			if err := k8s.Get(ctx, client.ObjectKeyFromObject(doomed), &kuprav1alpha1.PreviewSnapshot{}); !apierrors.IsNotFound(err) {
+				return fmt.Errorf("PreviewSnapshot doomed still exists (%v)", err)
+			}
+			return nil
+		})
+		waitForPhase(t, "snapshots", "source", kuprav1alpha1.PreviewRunning, "Succeeded")
+	})
+
 	restored := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "restored", Namespace: "snapshots"},
 		Spec: kuprav1alpha1.PreviewSpec{
@@ -224,9 +252,6 @@ template:
 		if p.Status.RestoredFrom == nil || p.Status.RestoredFrom.Name != "base-1" {
 			t.Errorf("restoredFrom = %v, want base-1", p.Status.RestoredFrom)
 		}
-		if c := apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored); c == nil || c.Message != "restored from PreviewSnapshot base-1" {
-			t.Errorf("Restored = %+v", c)
-		}
 		copied := waitForVolumeSnapshot(t, p.Status.Namespace, controller.LabelPreviewUID, string(p.UID))
 		var content snapshotv1.VolumeSnapshotContent
 		if err := k8s.Get(ctx, client.ObjectKey{Name: *copied.Spec.Source.VolumeSnapshotContentName}, &content); err != nil {
@@ -242,6 +267,11 @@ template:
 		if ref := pvc.Spec.DataSourceRef; ref == nil || ref.Kind != "VolumeSnapshot" || ref.Name != copied.Name {
 			t.Errorf("claim's data source = %+v, want %s", ref, copied.Name)
 		}
+
+		// The app runs on the claim before it's bound, as storage that binds on first use needs, but the restore isn't over until then.
+		waitForRestored(t, "snapshots", "restored", metav1.ConditionFalse, "PersistentVolumeClaim data")
+		bindClaim(t, p.Status.Namespace, "data")
+		waitForRestored(t, "snapshots", "restored", metav1.ConditionTrue, "restored from PreviewSnapshot base-1")
 	})
 
 	t.Run("reset", func(t *testing.T) {
@@ -272,6 +302,8 @@ template:
 			}
 			return nil
 		})
+		bindClaim(t, p.Status.Namespace, "data")
+		waitForRestored(t, "snapshots", "restored", metav1.ConditionTrue, "restored from PreviewSnapshot base-1")
 	})
 
 	t.Run("deletion is held while in use", func(t *testing.T) {
@@ -322,5 +354,142 @@ template:
 			}
 			return nil
 		})
+	})
+}
+
+// bindClaim plays the provisioner: it marks a claim as bound, which is when a claim restored from a snapshot has taken in its data.
+func bindClaim(t *testing.T, namespace, name string) {
+	t.Helper()
+	eventually(t, func() error {
+		var pvc corev1.PersistentVolumeClaim
+		if err := k8s.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &pvc); err != nil {
+			return err
+		}
+		pvc.Status.Phase = corev1.ClaimBound
+		return k8s.Status().Update(context.Background(), &pvc)
+	})
+}
+
+// waitForRestored waits for a preview's Restored condition to have a status and a message.
+func waitForRestored(t *testing.T, namespace, name string, status metav1.ConditionStatus, message string) {
+	t.Helper()
+	eventually(t, func() error {
+		p := getPreview(t, namespace, name)
+		c := apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored)
+		if c == nil || c.Status != status || !strings.Contains(c.Message, message) {
+			return fmt.Errorf("Preview %s: Restored %+v, want %s with %q", name, c, status, message)
+		}
+		return nil
+	})
+}
+
+func TestRestoreRetries(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	createNamespace(t, "restore-retries", nil)
+	createApp(t, "restore-retries", "app", `
+parameters:
+  - name: size
+    title: Size
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storageExpr: parameters.size
+`)
+
+	// A snapshot that captured the claim, as if kupra had taken it.
+	captured := &snapshotv1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "captured", Namespace: "restore-retries"},
+		Spec:       snapshotv1.VolumeSnapshotSpec{Source: snapshotv1.VolumeSnapshotSource{PersistentVolumeClaimName: ptr("data")}},
+	}
+	if err := k8s.Create(ctx, captured); err != nil {
+		t.Fatal(err)
+	}
+	takeSnapshot(t, captured, "handle-retry")
+	snap := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "restore-retries", Labels: map[string]string{"kupra.futo.tech/channel": "base"}},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "gone"}}},
+	}
+	if err := k8s.Create(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	status := kuprav1alpha1.PreviewSnapshotStatus{
+		StartTime:      &now,
+		CompletionTime: &now,
+		Phase:          kuprav1alpha1.PreviewSnapshotSucceeded,
+		ReadyToUse:     true,
+		Captures: []kuprav1alpha1.Capture{{
+			Kind: "PersistentVolumeClaim",
+			Name: "data",
+			Data: []corev1.TypedLocalObjectReference{{APIGroup: ptr("snapshot.storage.k8s.io"), Kind: "VolumeSnapshot", Name: "captured"}},
+		}},
+	}
+	// The snapshot's own controller may write to it meanwhile.
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+			return err
+		}
+		snap.Status = status
+		return k8s.Status().Update(ctx, snap)
+	})
+
+	preview := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "retry", Namespace: "restore-retries"},
+		Spec: kuprav1alpha1.PreviewSpec{
+			AppRef:     meta.LocalObjectReference{Name: "app"},
+			Parameters: map[string]string{"size": "lots"},
+			RestoreFrom: &kuprav1alpha1.RestoreSource{
+				SnapshotSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kupra.futo.tech/channel": "base"}},
+			},
+		},
+	}
+	if err := k8s.Create(ctx, preview); err != nil {
+		t.Fatal(err)
+	}
+
+	// The API server refuses the claim, so it isn't restored yet.
+	p := waitForPhase(t, "restore-retries", "retry", kuprav1alpha1.PreviewStarting, controller.ReasonApplyFailed)
+	if apimeta.IsStatusConditionTrue(p.Status.Conditions, controller.ConditionRestored) {
+		t.Error("Restored is true before the claim exists")
+	}
+
+	// Once the claim is valid, it's still restored from the snapshot.
+	p.Spec.Parameters["size"] = "1Gi"
+	if err := k8s.Update(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	var pvc corev1.PersistentVolumeClaim
+	eventually(t, func() error {
+		return k8s.Get(ctx, client.ObjectKey{Namespace: p.Status.Namespace, Name: "data"}, &pvc)
+	})
+	if pvc.Spec.DataSourceRef == nil || pvc.Spec.DataSourceRef.Kind != "VolumeSnapshot" {
+		t.Errorf("claim's data source = %+v, want the restored VolumeSnapshot", pvc.Spec.DataSourceRef)
+	}
+
+	// While the claim is provisioning, the snapshot it restores from is held.
+	waitForRestored(t, "restore-retries", "retry", metav1.ConditionFalse, "PersistentVolumeClaim data")
+	if err := k8s.Delete(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	s := waitForSnapshotPhase(t, "restore-retries", "base", kuprav1alpha1.PreviewSnapshotDeleting)
+	if c := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReconcilingCondition); c == nil || !strings.Contains(c.Message, "Preview retry") {
+		t.Errorf("Reconciling = %+v, want it to name Preview retry", c)
+	}
+
+	bindClaim(t, p.Status.Namespace, "data")
+	waitForRestored(t, "restore-retries", "retry", metav1.ConditionTrue, "restored from PreviewSnapshot base")
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), &kuprav1alpha1.PreviewSnapshot{}); !apierrors.IsNotFound(err) {
+			return fmt.Errorf("PreviewSnapshot base still exists (%v)", err)
+		}
+		return nil
 	})
 }

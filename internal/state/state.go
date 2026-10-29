@@ -21,6 +21,8 @@ type Kind interface {
 	Restore(RestoreRequest) Response
 	// Ready reports whether the live resource is ready for the rest of the preview to use.
 	Ready(live *unstructured.Unstructured) bool
+	// Restored reports whether a live resource restored from a capture has taken in its data, so the capture can go.
+	Restored(live *unstructured.Unstructured) bool
 	// Capture works out how to capture a state resource into a snapshot.
 	Capture(CaptureRequest) Response
 }

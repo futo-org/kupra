@@ -40,7 +40,7 @@ const (
 // +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots/status,verbs=get;update;patch
 
-// snapshotsOf lists the PreviewSnapshots of a preview that haven't finished, oldest first.
+// snapshotsOf lists the PreviewSnapshots of a preview that haven't finished, oldest first. A snapshot that's being deleted is listed too, since a capture of it that has started has to finish.
 func (r *PreviewReconciler) snapshotsOf(ctx context.Context, p *kuprav1alpha1.Preview) ([]kuprav1alpha1.PreviewSnapshot, error) {
 	var list kuprav1alpha1.PreviewSnapshotList
 	if err := r.List(ctx, &list, client.InNamespace(p.Namespace), client.MatchingFields{sourceIndex: p.Name}); err != nil {
@@ -48,7 +48,7 @@ func (r *PreviewReconciler) snapshotsOf(ctx context.Context, p *kuprav1alpha1.Pr
 	}
 	var out []kuprav1alpha1.PreviewSnapshot
 	for _, s := range list.Items {
-		if s.Status.CompletionTime == nil && s.DeletionTimestamp.IsZero() {
+		if s.Status.CompletionTime == nil {
 			out = append(out, s)
 		}
 	}
@@ -78,10 +78,14 @@ func (r *PreviewReconciler) runningCapture(ctx context.Context, p *kuprav1alpha1
 // startCapture starts the oldest waiting capture of a running preview. It reports whether it started one.
 func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.Preview) (bool, error) {
 	snapshots, err := r.snapshotsOf(ctx, p)
-	if err != nil || len(snapshots) == 0 {
+	if err != nil {
 		return false, err
 	}
-	s := &snapshots[0]
+	i := slices.IndexFunc(snapshots, func(s kuprav1alpha1.PreviewSnapshot) bool { return s.DeletionTimestamp.IsZero() })
+	if i < 0 {
+		return false, nil
+	}
+	s := &snapshots[i]
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	now := metav1.Now()
 	s.Status.StartTime = &now
@@ -374,15 +378,28 @@ func stopped(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStopped
 }
 
+// restorePlan is how a preview's state starts.
+type restorePlan struct {
+	// resources are the state resources to apply.
+	resources []*unstructured.Unstructured
+	// done is set once every state resource can be applied.
+	done bool
+	// summary is set when this is the preview's first start, or its first after a reset, and says how its state started.
+	summary      string
+	fromSnapshot bool
+}
+
 // restoreState works out how each state resource starts, and returns the resources to apply. Until the preview's state has started, missing resources start from the snapshot it restores from, if any. After that, state the template gains starts empty, since only a reset restores. It returns a reason when the preview can't go on.
-func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, namespace string, states []*unstructured.Unstructured) (resources []*unstructured.Unstructured, done bool, reason, message string, err error) {
+func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, namespace string, states []*unstructured.Unstructured) (plan *restorePlan, reason, message string, err error) {
+	var resources []*unstructured.Unstructured
+	done := true
 	restoring := !apimeta.IsStatusConditionTrue(p.Status.Conditions, ConditionRestored)
 	var snapshot *kuprav1alpha1.PreviewSnapshot
 	if restoring && p.Spec.RestoreFrom != nil {
 		if p.Status.RestoredFrom == nil {
 			s, reason, message, err := r.chooseSnapshot(ctx, p)
 			if err != nil || reason != "" {
-				return nil, false, reason, message, err
+				return nil, reason, message, err
 			}
 			p.Status.RestoredFrom = &meta.LocalObjectReference{Name: s.Name}
 			snapshot = s
@@ -390,22 +407,21 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 			var s kuprav1alpha1.PreviewSnapshot
 			if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Status.RestoredFrom.Name}, &s); err != nil {
 				if apierrors.IsNotFound(err) {
-					return nil, false, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s, which the preview restores from, was deleted; reset the preview to start again", p.Status.RestoredFrom.Name), nil
+					return nil, ReasonSnapshotNotFound, fmt.Sprintf("PreviewSnapshot %s, which the preview restores from, was deleted; reset the preview to start again", p.Status.RestoredFrom.Name), nil
 				}
-				return nil, false, "", "", err
+				return nil, "", "", err
 			}
 			snapshot = &s
 		}
 	}
 
-	done = true
 	var empty []string
 	for _, obj := range states {
 		gk := obj.GroupVersionKind().GroupKind()
 		kind, _ := state.For(gk)
 		live, err := r.getLive(ctx, applier, gk, namespace, obj.GetName())
 		if err != nil {
-			return nil, false, "", "", err
+			return nil, "", "", err
 		}
 		req := state.RestoreRequest{
 			Resource: obj,
@@ -425,10 +441,10 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 			return kind.Restore(req)
 		}, "", nil)
 		if err != nil {
-			return nil, false, "", "", err
+			return nil, "", "", err
 		}
 		if resp.Failed != "" {
-			return nil, false, ReasonRestoreFailed, fmt.Sprintf("restoring %s %s: %s", obj.GetKind(), obj.GetName(), resp.Failed), nil
+			return nil, ReasonRestoreFailed, fmt.Sprintf("restoring %s %s: %s", obj.GetKind(), obj.GetName(), resp.Failed), nil
 		}
 		if !resp.Done {
 			done = false
@@ -437,7 +453,9 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		resources = append(resources, resp.Resource)
 	}
 
+	plan = &restorePlan{resources: resources, done: done}
 	if restoring && done {
+		plan.fromSnapshot = snapshot != nil
 		message := "started empty"
 		if snapshot != nil {
 			message = "restored from PreviewSnapshot " + snapshot.Name
@@ -448,7 +466,34 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 				message += "; nothing to restore " + strings.Join(unmatched, ", ") + " into"
 			}
 		}
-		setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionTrue, meta.SucceededReason, message)
+		plan.summary = message
 	}
-	return resources, done, "", "", nil
+	return plan, "", "", nil
+}
+
+// recordRestore marks a preview's state as restored, once the state resources it applied exist and, when they came from a snapshot, have taken in its data. Until then, missing resources keep starting from the snapshot, which isn't deleted. It reports whether the restore is still settling.
+func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, plan *restorePlan) (bool, error) {
+	if plan.summary == "" {
+		return false, nil
+	}
+	if plan.fromSnapshot {
+		var waiting []string
+		for _, obj := range plan.resources {
+			gk := obj.GroupVersionKind().GroupKind()
+			kind, _ := state.For(gk)
+			live, err := r.getLive(ctx, applier, gk, obj.GetNamespace(), obj.GetName())
+			if err != nil {
+				return false, err
+			}
+			if live == nil || !kind.Restored(live) {
+				waiting = append(waiting, obj.GetKind()+" "+obj.GetName())
+			}
+		}
+		if len(waiting) > 0 {
+			setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionFalse, meta.ProgressingReason, "waiting for "+strings.Join(waiting, ", ")+" to take in the restored data")
+			return true, nil
+		}
+	}
+	setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionTrue, meta.SucceededReason, plan.summary)
+	return false, nil
 }

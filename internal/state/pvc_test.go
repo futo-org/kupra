@@ -52,3 +52,13 @@ func TestPersistentVolumeClaimReady(t *testing.T) {
 		t.Error("a pending claim isn't ready")
 	}
 }
+
+func TestPersistentVolumeClaimRestored(t *testing.T) {
+	kind, _ := For(schema.GroupKind{Kind: "PersistentVolumeClaim"})
+	for phase, want := range map[string]bool{"Pending": false, "Bound": true, "": false} {
+		claim := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"phase": phase}}}
+		if got := kind.Restored(claim); got != want {
+			t.Errorf("Restored with phase %q = %v, want %v", phase, got, want)
+		}
+	}
+}

@@ -274,3 +274,9 @@ func snapshotHandle(content *snapshotv1.VolumeSnapshotContent) *string {
 	}
 	return nil
 }
+
+// Restored is true once the claim is bound, since the volume is only provisioned from the snapshot then.
+func (persistentVolumeClaim) Restored(live *unstructured.Unstructured) bool {
+	phase, _, _ := unstructured.NestedString(live.Object, "status", "phase")
+	return phase == string(corev1.ClaimBound)
+}

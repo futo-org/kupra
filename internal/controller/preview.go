@@ -241,7 +241,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 		workload = append(workload, obj.Unstructured)
 	}
-	restored, restoreDone, reason, message, err := r.restoreState(ctx, p, applier, nsName, states)
+	plan, reason, message, err := r.restoreState(ctx, p, applier, nsName, states)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -256,8 +256,13 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		return ctrl.Result{}, nil
 	}
 
+	restored := plan.resources
 	applied, err := applyAll(ctx, applier, restored, true)
-	if err == nil && !restoreDone {
+	var restoreSettling bool
+	if err == nil {
+		restoreSettling, err = r.recordRestore(ctx, p, applier, plan)
+	}
+	if err == nil && !plan.done {
 		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
 		provisioning(p, "restoring state")
 		stallAfterTimeout(p, &app, "restoring state")
@@ -306,6 +311,9 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 			return ctrl.Result{}, err
 		} else if started {
 			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+		}
+		if restoreSettling {
+			return ctrl.Result{RequeueAfter: startingInterval}, nil
 		}
 		return ctrl.Result{RequeueAfter: runningInterval}, nil
 	}
