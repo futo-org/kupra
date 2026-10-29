@@ -15,7 +15,7 @@ func templateRole(ctx context.Context, c client.Client, name string) (*rbacv1.Cl
 	var role rbacv1.ClusterRole
 	if err := c.Get(ctx, client.ObjectKey{Name: name}, &role); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, ReasonClusterRoleNotFound, fmt.Sprintf("the policy's ClusterRole %s doesn't exist", name), nil
+			return nil, ReasonClusterRoleNotFound, fmt.Sprintf("ClusterRole %s not found", name), nil
 		}
 		return nil, "", "", err
 	}
@@ -27,7 +27,7 @@ func templateRole(ctx context.Context, c client.Client, name string) (*rbacv1.Cl
 		return nil, "", "", err
 	}
 	if !review.Status.Allowed {
-		return nil, ReasonCannotBindRole, fmt.Sprintf("kupra isn't allowed to bind the policy's ClusterRole %s. Allow it with a ClusterRole labelled %s that grants bind on it.", name, LabelAggregateToOperator), nil
+		return nil, ReasonCannotBindRole, fmt.Sprintf("kupra may not bind ClusterRole %s", name), nil
 	}
 	return &role, "", "", nil
 }
