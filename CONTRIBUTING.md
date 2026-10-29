@@ -7,9 +7,9 @@ kupra's design is described in its [ADRs](docs/adr), starting with [ADR 1](docs/
 Tools are pinned with [mise](https://mise.jdx.dev). After `mise install`:
 
 - `mise run check` lints and runs the unit tests.
-- `mise run generate` generates deepcopy code, CRDs and RBAC from the API types and `+kubebuilder` markers. CI fails if generated files are out of date.
+- `mise run generate` generates deepcopy code, CRDs and RBAC from the API types and `+kubebuilder` markers. CI fails if generated files are out of date. The operator's RBAC goes to `charts/kupra/files/role.yaml`, and the chart puts its Role in the release's namespace, so `namespace=kupra-system` in markers means the namespace kupra is installed in.
 - `mise run test:integration` runs the controller tests against a local API server, with envtest.
-- `mise run e2e:up` creates a kind cluster with the CSI snapshot controller, the CSI hostpath driver and CloudNativePG. `mise run test:e2e` runs the end-to-end tests on it, and `mise run e2e:down` deletes it.
+- `mise run e2e:up` creates a kind cluster with the CSI snapshot controller, the CSI hostpath driver and CloudNativePG. It also installs the chart, with an operator image built by [ko](https://ko.build) from the working tree. `mise run test:smoke` checks that the installed operator reconciles a Preview. `mise run test:e2e` scales it down and runs the end-to-end tests on the cluster, and `mise run e2e:down` deletes it.
 
 There are three layers of tests:
 
@@ -34,3 +34,7 @@ There are three layers of tests:
 ## ADRs
 
 An ADR stays Proposed until it's implemented. The PR that finishes the last part of an ADR marks it Accepted, and updates it if the implementation turned out differently.
+
+## Releases
+
+release-please opens a release PR from the conventional commits on `main`. Merging it tags the release, and publishes the operator's image to `ghcr.io/futo-org/kupra-operator` and the chart to `oci://ghcr.io/futo-org/charts/kupra`, all with the same version. [Installing kupra](docs/install.md) covers installs and upgrades.

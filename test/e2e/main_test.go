@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -65,6 +68,11 @@ func run(m *testing.M) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if err := stopInstalledOperator(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "stopping the installed operator: %v\n", err)
+		return 1
+	}
+
 	// The operator runs in this process, but with its own service account's token, so its RBAC is what's tested.
 	operatorCfg, err := serviceAccountConfig(ctx, cfg, kupraNamespace, operatorName)
 	if err != nil {
@@ -93,6 +101,28 @@ func run(m *testing.M) int {
 	}()
 
 	return m.Run()
+}
+
+// stopInstalledOperator scales the chart's operator down, so that only the one in this process reconciles.
+func stopInstalledOperator(ctx context.Context) error {
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: kupraNamespace, Name: operatorName}}
+	if err := k8s.Patch(ctx, deploy, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`))); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		var pods corev1.PodList
+		if err := k8s.List(ctx, &pods, client.InNamespace(kupraNamespace), client.MatchingLabels(deploy.Spec.Selector.MatchLabels)); err != nil {
+			return err
+		}
+		if len(pods.Items) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%d operator pods still running", len(pods.Items))
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 func serviceAccountConfig(ctx context.Context, cfg *rest.Config, namespace, name string) (*rest.Config, error) {
