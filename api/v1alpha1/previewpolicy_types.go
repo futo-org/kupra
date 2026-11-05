@@ -92,3 +92,13 @@ type PreviewPolicyList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []PreviewPolicy `json:"items"`
 }
+
+// GetConditions returns the status conditions of the object.
+func (in *PreviewPolicy) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+// SetConditions sets the status conditions on the object.
+func (in *PreviewPolicy) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}

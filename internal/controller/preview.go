@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/conditions"
+	"github.com/fluxcd/pkg/runtime/patch"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -85,25 +87,27 @@ type PreviewReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;create;patch;delete
 // +kubebuilder:rbac:groups="",namespace=kupra-system,resources=serviceaccounts,verbs=get;create;patch;delete;impersonate
 
-// Reconcile does the writes: it adds the finalizer, patches whatever status reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done.
+// previewConditions are the conditions the PreviewReconciler owns.
+var previewConditions = patch.WithOwnedConditions{Conditions: []string{meta.ReadyCondition, meta.ReconcilingCondition, meta.StalledCondition, ConditionRestored}}
+
+// Reconcile does the writes: it adds the finalizer, patches whatever reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done.
 func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var preview kuprav1alpha1.Preview
 	if err := r.Get(ctx, req.NamespacedName, &preview); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	patcher := patch.NewSerialPatcher(&preview, r.Client)
 	deleting := !preview.DeletionTimestamp.IsZero()
 	switch {
 	case deleting && !controllerutil.ContainsFinalizer(&preview, Finalizer):
 		return ctrl.Result{}, nil
 	case !deleting && !controllerutil.ContainsFinalizer(&preview, Finalizer):
-		patch := client.MergeFromWithOptions(preview.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(&preview, Finalizer)
-		if err := r.Patch(ctx, &preview, patch); err != nil {
+		if err := patcher.Patch(ctx, &preview, previewConditions, patch.WithFieldOwner(FieldManager)); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	before := preview.DeepCopy()
 	var result ctrl.Result
 	var cleanedUp bool
 	var err error
@@ -112,17 +116,14 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		result, err = r.reconcile(ctx, &preview)
 	}
-	// The lock keeps a reconciliation that started from a stale read from writing stale status.
-	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
-		if apierrors.IsConflict(patchErr) && err == nil {
-			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
-		}
-		return ctrl.Result{}, errors.Join(err, patchErr)
-	}
 	if cleanedUp {
-		patch := client.MergeFromWithOptions(preview.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.RemoveFinalizer(&preview, Finalizer)
-		return ctrl.Result{}, r.Patch(ctx, &preview, patch)
+	}
+	if patchErr := patcher.Patch(ctx, &preview, previewConditions, patch.WithFieldOwner(FieldManager)); patchErr != nil {
+		// Removing the finalizer can delete the Preview before its status is written.
+		if !cleanedUp || !apierrors.IsNotFound(patchErr) {
+			return ctrl.Result{}, errors.Join(err, patchErr)
+		}
 	}
 	return result, err
 }
@@ -193,7 +194,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 		return ctrl.Result{}, err
 	}
-	if c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
+	if c := conditions.Get(&app, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
 		message := fmt.Sprintf("PreviewApp %s hasn't been checked yet", app.Name)
 		if c != nil && c.ObservedGeneration == app.Generation {
 			message = fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message)
@@ -335,9 +336,8 @@ func stallAfterTimeout(p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, 
 	if app.Spec.Timeout != nil {
 		timeout = app.Spec.Timeout.Duration
 	}
-	if c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReconcilingCondition); c != nil && time.Since(c.LastTransitionTime.Time) > timeout {
-		setCondition(&p.Status.Conditions, p.Generation, meta.StalledCondition, metav1.ConditionTrue, ReasonTimeout,
-			fmt.Sprintf("not ready after %s: %s", timeout, message))
+	if c := conditions.Get(p, meta.ReconcilingCondition); c != nil && time.Since(c.LastTransitionTime.Time) > timeout {
+		conditions.MarkTrue(p, meta.StalledCondition, ReasonTimeout, "not ready after %s: %s", timeout, message)
 	}
 }
 
@@ -609,9 +609,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 
 	p.Status.ObservedGeneration = p.Generation
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonTerminating, "")
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, ReasonTerminating, "")
+	conditions.MarkTrue(p, meta.ReconcilingCondition, ReasonTerminating, "%s", fmt.Sprintf("deleting namespace %s", nsName))
+	conditions.Delete(p, meta.StalledCondition)
 
 	var ns corev1.Namespace
 	gone := false
@@ -651,9 +651,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 
 func pending(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewPending
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, meta.StalledCondition, metav1.ConditionTrue, reason, message)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.ReconcilingCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
+	conditions.MarkTrue(p, meta.StalledCondition, reason, "%s", message)
+	conditions.Delete(p, meta.ReconcilingCondition)
 }
 
 func failed(p *kuprav1alpha1.Preview, reason, message string) {
@@ -668,16 +668,16 @@ func provisioning(p *kuprav1alpha1.Preview, message string) {
 
 func starting(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStarting
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, meta.ProgressingReason, message)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
+	conditions.MarkTrue(p, meta.ReconcilingCondition, meta.ProgressingReason, "%s", message)
+	conditions.Delete(p, meta.StalledCondition)
 }
 
 func running(p *kuprav1alpha1.Preview) {
 	p.Status.Phase = kuprav1alpha1.PreviewRunning
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionTrue, meta.SucceededReason, "")
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.ReconcilingCondition)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
+	conditions.MarkTrue(p, meta.ReadyCondition, meta.SucceededReason, "")
+	conditions.Delete(p, meta.ReconcilingCondition)
+	conditions.Delete(p, meta.StalledCondition)
 }
 
 func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {

@@ -149,3 +149,13 @@ type PreviewAppList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []PreviewApp `json:"items"`
 }
+
+// GetConditions returns the status conditions of the object.
+func (in *PreviewApp) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+// SetConditions sets the status conditions on the object.
+func (in *PreviewApp) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
