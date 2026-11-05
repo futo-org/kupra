@@ -110,7 +110,7 @@ func native(v ref.Val) (any, error) {
 	case types.UintType:
 		u := v.Value().(uint64)
 		if u > math.MaxInt64 {
-			return nil, fmt.Errorf("%d is too large for a resource; convert it with string()", u)
+			return nil, fmt.Errorf("%d is out of range", u)
 		}
 		return int64(u), nil
 	case types.DurationType:
@@ -144,5 +144,5 @@ func native(v ref.Val) (any, error) {
 		}
 		return out, nil
 	}
-	return nil, fmt.Errorf("a %s can't go into a resource; convert it, for example with string()", v.Type().TypeName())
+	return nil, fmt.Errorf("unsupported type %s", v.Type().TypeName())
 }

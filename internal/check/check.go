@@ -43,7 +43,7 @@ func (c *Checker) Template(app *render.App, roleName string, rules []rbacv1.Poli
 			continue
 		}
 		if mapping.Scope.Name() == meta.RESTScopeNameRoot {
-			errs = append(errs, field.Forbidden(r.Path.Child("kind"), fmt.Sprintf("%s is cluster-scoped, and templates can only contain namespaced resources", gvk.Kind)))
+			errs = append(errs, field.Forbidden(r.Path.Child("kind"), fmt.Sprintf("%s is cluster-scoped", gvk.Kind)))
 			continue
 		}
 		if kind, ok := state.For(gvk.GroupKind()); ok && !optedOut(r.Object) {
@@ -87,7 +87,7 @@ func (c *Checker) Template(app *render.App, roleName string, rules []rbacv1.Poli
 
 // fieldSchema finds the schema for a field. It returns nil when nothing is known about the field's type.
 func fieldSchema(s *spec.Schema, path []any) (*spec.Schema, error) {
-	for i, elem := range path {
+	for _, elem := range path {
 		if s == nil {
 			return nil, nil
 		}
@@ -104,10 +104,7 @@ func fieldSchema(s *spec.Schema, path []any) (*spec.Schema, error) {
 			if preservesUnknownFields(s) {
 				return nil, nil
 			}
-			if i == len(path)-1 {
-				return nil, fmt.Errorf("there's no field %s", elem)
-			}
-			return nil, fmt.Errorf("there's no field %s at %s", elem, formatPath(path[:i+1]))
+			return nil, fmt.Errorf("unknown field %q", elem)
 		case int:
 			if s.Items == nil {
 				return nil, nil
@@ -218,22 +215,6 @@ func describe(s *spec.Schema) string {
 		return "a map"
 	}
 	return "a value of the field's type"
-}
-
-func formatPath(path []any) string {
-	var b strings.Builder
-	for _, elem := range path {
-		switch elem := elem.(type) {
-		case string:
-			if b.Len() > 0 {
-				b.WriteByte('.')
-			}
-			b.WriteString(elem)
-		case int:
-			fmt.Fprintf(&b, "[%d]", elem)
-		}
-	}
-	return b.String()
 }
 
 // optedOut reports whether a template resource is never state. An expression may still evaluate to true, so only "false" opts out of the checks.
