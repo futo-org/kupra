@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/conditions"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -72,9 +73,9 @@ func (r *PreviewSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		s.Status.CompletionTime = &now
 		s.Status.Phase = kuprav1alpha1.PreviewSnapshotFailed
 		message := fmt.Sprintf("Preview %s was deleted before its capture started", p.Name)
-		setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonPreviewDeleted, message)
-		setCondition(&s.Status.Conditions, s.Generation, meta.StalledCondition, metav1.ConditionTrue, ReasonPreviewDeleted, message)
-		apimeta.RemoveStatusCondition(&s.Status.Conditions, meta.ReconcilingCondition)
+		conditions.MarkFalse(&s, meta.ReadyCondition, ReasonPreviewDeleted, "%s", message)
+		conditions.MarkTrue(&s, meta.StalledCondition, ReasonPreviewDeleted, "%s", message)
+		conditions.Delete(&s, meta.ReconcilingCondition)
 	default:
 		waiting(&s, ReasonWaiting, fmt.Sprintf("waiting for Preview %s", p.Name))
 	}
@@ -86,8 +87,8 @@ func (r *PreviewSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 func waiting(s *kuprav1alpha1.PreviewSnapshot, reason, message string) {
 	s.Status.Phase = kuprav1alpha1.PreviewSnapshotInProgress
-	setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-	setCondition(&s.Status.Conditions, s.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, reason, message)
+	conditions.MarkFalse(s, meta.ReadyCondition, reason, "%s", message)
+	conditions.MarkTrue(s, meta.ReconcilingCondition, reason, "%s", message)
 }
 
 // reconcileDelete holds a snapshot while it's in use, then removes its data.
@@ -103,7 +104,7 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 		patch := client.MergeFrom(s.DeepCopy())
 		s.Status.Phase = kuprav1alpha1.PreviewSnapshotDeleting
 		message := "in use by " + strings.Join(holders, ", ")
-		setCondition(&s.Status.Conditions, s.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonInUse, message)
+		conditions.MarkTrue(s, meta.ReconcilingCondition, ReasonInUse, "%s", message)
 		if err := r.Status().Patch(ctx, s, patch); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}

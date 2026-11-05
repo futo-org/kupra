@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/conditions"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -101,8 +102,8 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	// The app that rendered the running preview, which a capture holds back changes to.
 	s.Status.Parameters = render.WithDefaults(app.Spec.Parameters, p.Spec.Parameters)
 	s.Status.Phase = kuprav1alpha1.PreviewSnapshotInProgress
-	setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonCapturing, "")
-	setCondition(&s.Status.Conditions, s.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonCapturing, fmt.Sprintf("capturing Preview %s", p.Name))
+	conditions.MarkFalse(s, meta.ReadyCondition, ReasonCapturing, "")
+	conditions.MarkTrue(s, meta.ReconcilingCondition, ReasonCapturing, "%s", fmt.Sprintf("capturing Preview %s", p.Name))
 	return true, client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
 
@@ -199,16 +200,16 @@ func (r *PreviewReconciler) finishSnapshot(ctx context.Context, s *kuprav1alpha1
 	now := metav1.Now()
 	s.Status.CompletionTime = &now
 	s.Status.ObservedGeneration = s.Generation
-	apimeta.RemoveStatusCondition(&s.Status.Conditions, meta.ReconcilingCondition)
+	conditions.Delete(s, meta.ReconcilingCondition)
 	if failure != "" {
 		s.Status.Phase = kuprav1alpha1.PreviewSnapshotFailed
-		setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonCaptureFailed, failure)
-		setCondition(&s.Status.Conditions, s.Generation, meta.StalledCondition, metav1.ConditionTrue, ReasonCaptureFailed, failure)
+		conditions.MarkFalse(s, meta.ReadyCondition, ReasonCaptureFailed, "%s", failure)
+		conditions.MarkTrue(s, meta.StalledCondition, ReasonCaptureFailed, "%s", failure)
 	} else {
 		s.Status.Phase = kuprav1alpha1.PreviewSnapshotSucceeded
 		s.Status.ReadyToUse = true
 		s.Status.Captures = captures
-		setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionTrue, meta.SucceededReason, "")
+		conditions.MarkTrue(s, meta.ReadyCondition, meta.SucceededReason, "")
 	}
 	return client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
@@ -251,7 +252,7 @@ func (r *PreviewReconciler) finishReset(ctx context.Context, p *kuprav1alpha1.Pr
 	p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
 	p.Status.Inventory = nil
 	p.Status.RestoredFrom = nil
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, ConditionRestored)
+	conditions.Delete(p, ConditionRestored)
 	return true, nil
 }
 
@@ -413,9 +414,9 @@ func stateEntries(inventory []kuprav1alpha1.InventoryEntry) []kuprav1alpha1.Inve
 
 func stopping(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStopping
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, reason, message)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
+	markReconciling(p, reason, message)
+	conditions.Delete(p, meta.StalledCondition)
 }
 
 func stopped(p *kuprav1alpha1.Preview, reason, message string) {
@@ -438,7 +439,7 @@ type restorePlan struct {
 func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.Preview, applier client.Client, namespace string, states []*unstructured.Unstructured) (plan *restorePlan, reason, message string, err error) {
 	var resources []*unstructured.Unstructured
 	done := true
-	restoring := !apimeta.IsStatusConditionTrue(p.Status.Conditions, ConditionRestored)
+	restoring := !conditions.IsTrue(p, ConditionRestored)
 	var snapshot *kuprav1alpha1.PreviewSnapshot
 	if restoring {
 		// A restore that has started keeps its snapshot, even if restoreFrom changes. The hold records the choice even if its status write was lost.
@@ -548,14 +549,14 @@ func (r *PreviewReconciler) recordRestore(ctx context.Context, p *kuprav1alpha1.
 			}
 		}
 		if len(waiting) > 0 {
-			setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionFalse, meta.ProgressingReason, "waiting for "+strings.Join(waiting, ", ")+" to be restored")
+			conditions.MarkFalse(p, ConditionRestored, meta.ProgressingReason, "%s", "waiting for "+strings.Join(waiting, ", ")+" to be restored")
 			return true, nil
 		}
 	}
 	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return false, err
 	}
-	setCondition(&p.Status.Conditions, p.Generation, ConditionRestored, metav1.ConditionTrue, meta.SucceededReason, plan.summary)
+	conditions.MarkTrue(p, ConditionRestored, meta.SucceededReason, "%s", plan.summary)
 	return false, nil
 }
 
