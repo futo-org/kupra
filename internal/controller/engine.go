@@ -16,7 +16,7 @@ import (
 const (
 	// LabelPreviewUID marks objects kupra creates for a preview outside its namespace.
 	LabelPreviewUID = "kupra.futo.tech/preview-uid"
-	// LabelSnapshotUID marks objects kupra creates for a PreviewSnapshot.
+	// LabelSnapshotUID marks objects that hold a PreviewSnapshot's data, which are deleted with it.
 	LabelSnapshotUID = "kupra.futo.tech/snapshot-uid"
 
 	// maxKindRounds bounds how often a kind is called in one reconciliation.

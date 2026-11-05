@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,4 +120,18 @@ func zeroValue(t kuprav1alpha1.ParameterType) any {
 	default:
 		return ""
 	}
+}
+
+// WithDefaults returns a Preview's parameter values, with the PreviewApp's defaults for those it leaves out.
+func WithDefaults(params []kuprav1alpha1.Parameter, values map[string]string) map[string]string {
+	out := maps.Clone(values)
+	for _, p := range params {
+		if _, ok := out[string(p.Name)]; !ok && p.Default != nil {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[string(p.Name)] = *p.Default
+		}
+	}
+	return out
 }

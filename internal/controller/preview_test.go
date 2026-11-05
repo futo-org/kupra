@@ -126,3 +126,24 @@ func TestNextCapture(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordResetRequest(t *testing.T) {
+	p := &kuprav1alpha1.Preview{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AnnotationResetRequestedAt: "1"}}}
+	recordResetRequest(p)
+	if !resetRequested(p) || p.Status.PendingResetAt != "1" {
+		t.Fatalf("pending = %q, want 1", p.Status.PendingResetAt)
+	}
+	// The request survives its annotation being removed.
+	p.Annotations = nil
+	recordResetRequest(p)
+	if !resetRequested(p) {
+		t.Error("reset no longer requested once the annotation is gone")
+	}
+	// A handled value isn't requested again.
+	p.Status.LastHandledResetAt, p.Status.PendingResetAt = "1", ""
+	p.Annotations = map[string]string{AnnotationResetRequestedAt: "1"}
+	recordResetRequest(p)
+	if resetRequested(p) {
+		t.Error("a handled reset is requested again")
+	}
+}

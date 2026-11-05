@@ -72,6 +72,10 @@ type PreviewStatus struct {
 	// +optional
 	RestoredFrom *meta.LocalObjectReference `json:"restoredFrom,omitempty"`
 
+	// PendingResetAt is a kupra.futo.tech/reset-requested-at value that hasn't been handled yet. It's kept if the annotation is removed.
+	// +optional
+	PendingResetAt string `json:"pendingResetAt,omitempty"`
+
 	// LastHandledResetAt is the last handled value of the kupra.futo.tech/reset-requested-at annotation.
 	// +optional
 	LastHandledResetAt string `json:"lastHandledResetAt,omitempty"`
