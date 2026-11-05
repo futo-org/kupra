@@ -540,6 +540,8 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 				empty = append(empty, obj.GetKind()+" "+obj.GetName())
 			case live == nil:
 				req.From = &state.Source{Namespace: snapshot.Namespace, Data: c.Data}
+				// Restore copies go with the preview, or with the snapshot, whose data they hold.
+				req.Labels[LabelSnapshotUID] = string(snapshot.UID)
 			}
 		}
 		resp, err := r.runKind(ctx, func(observed state.Observed) state.Response {
