@@ -644,3 +644,20 @@ template:
 		}
 	})
 }
+
+func TestWithDefaults(t *testing.T) {
+	tag, level := "17.0.1", "log"
+	params := []kuprav1alpha1.Parameter{
+		{Name: "tag", Default: &tag},
+		{Name: "level", Default: &level},
+		{Name: "title"},
+	}
+	got := WithDefaults(params, map[string]string{"level": "debug", "title": "main"})
+	want := map[string]string{"tag": "17.0.1", "level": "debug", "title": "main"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("WithDefaults = %v, want %v", got, want)
+	}
+	if got := WithDefaults(params, nil); !reflect.DeepEqual(got, map[string]string{"tag": "17.0.1", "level": "log"}) {
+		t.Errorf("WithDefaults without values = %v", got)
+	}
+}
