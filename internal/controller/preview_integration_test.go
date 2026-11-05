@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/controller"
 	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/policy"
 )
@@ -130,6 +131,14 @@ template:
 	}
 	if len(p.Status.Inventory) != 4 {
 		t.Errorf("inventory = %v, want the ConfigMap, both claims and the Service", p.Status.Inventory)
+	}
+	// Pruning only deletes objects with the preview's owner labels.
+	var config corev1.ConfigMap
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "config"}, &config); err != nil {
+		t.Fatal(err)
+	}
+	if l := config.Labels; l["preview.kupra.futo.tech/name"] != "pr-1" || l["preview.kupra.futo.tech/namespace"] != "previews" {
+		t.Errorf("ConfigMap config labels = %v, want the preview's owner labels", l)
 	}
 
 	var ns corev1.Namespace
@@ -426,5 +435,135 @@ template:
 			}
 			return nil
 		})
+	})
+}
+
+// When an apply fails after earlier ones in the same batch succeeded, those are still in the inventory, so they can be pruned later.
+func TestPartialApply(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	// Refuses the real apply of one ConfigMap, after its dry run passes.
+	applyYAML(t, []byte(`
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-refuse-real-apply
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [configmaps]
+  validations:
+    - expression: request.dryRun || object.metadata.name != 'refused'
+      message: refused
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: test-refuse-real-apply
+spec:
+  policyName: test-refuse-real-apply
+  validationActions: [Deny]
+`))
+	createNamespace(t, "partial", nil)
+	// The policy may take a moment to come into effect.
+	eventually(t, func() error {
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "refused", Namespace: "partial"}}
+		err := k8s.Create(ctx, cm)
+		if err == nil {
+			_ = k8s.Delete(ctx, cm)
+			return fmt.Errorf("the policy doesn't refuse ConfigMap refused yet")
+		}
+		if !apierrors.IsInvalid(err) && !apierrors.IsForbidden(err) {
+			return err
+		}
+		return nil
+	})
+	createApp(t, "partial", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: accepted
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: refused
+`)
+	if err := k8s.Create(ctx, &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial", Namespace: "partial"},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		p := getPreview(t, "partial", "partial")
+		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
+		// The refusal comes from the real apply, after the dry run passed.
+		if c == nil || c.Reason != controller.ReasonApplyFailed || !strings.Contains(c.Message, "refused") || !strings.Contains(c.Message, "apply failed") || strings.Contains(c.Message, "dry-run") {
+			return fmt.Errorf("Ready = %+v, want the real apply refused", c)
+		}
+		if !slices.ContainsFunc(p.Status.Inventory, func(e kuprav1alpha1.InventoryEntry) bool { return e.Name == "accepted" }) {
+			return fmt.Errorf("inventory = %+v, want ConfigMap accepted", p.Status.Inventory)
+		}
+		return nil
+	})
+}
+
+// Finalizers the template adds to an applied resource, or removes again, are applied, though ssa's drift detection ignores them.
+func TestTemplateFinalizers(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	createNamespace(t, "finalizers", nil)
+	app := createApp(t, "finalizers", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+`)
+	if err := k8s.Create(ctx, &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "pr", Namespace: "finalizers"},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := waitForPhase(t, "finalizers", "pr", kuprav1alpha1.PreviewRunning, "Succeeded")
+
+	setTemplate := func(metadata string) {
+		t.Helper()
+		eventually(t, func() error {
+			if err := k8s.Get(ctx, client.ObjectKeyFromObject(app), app); err != nil {
+				return err
+			}
+			app.Spec.Template.Resources[0].Raw = []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":` + metadata + `}`)
+			return k8s.Update(ctx, app)
+		})
+	}
+	finalizers := func() []string {
+		var cm corev1.ConfigMap
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: p.Status.Namespace, Name: "config"}, &cm); err != nil {
+			t.Fatal(err)
+		}
+		return cm.Finalizers
+	}
+
+	setTemplate(`{"name":"config","finalizers":["example.com/test"]}`)
+	eventually(t, func() error {
+		if got := finalizers(); !slices.Contains(got, "example.com/test") {
+			return fmt.Errorf("finalizers = %v, want example.com/test", got)
+		}
+		return nil
+	})
+	setTemplate(`{"name":"config"}`)
+	eventually(t, func() error {
+		if got := finalizers(); len(got) > 0 {
+			return fmt.Errorf("finalizers = %v, want them removed", got)
+		}
+		return nil
 	})
 }

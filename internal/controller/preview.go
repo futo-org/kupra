@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -10,9 +11,12 @@ import (
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/conditions"
+	"github.com/fluxcd/pkg/ssa"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -85,7 +89,7 @@ type PreviewReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;create;patch;delete
 // +kubebuilder:rbac:groups="",namespace=kupra-system,resources=serviceaccounts,verbs=get;create;patch;delete;impersonate
 
-// Reconcile does the writes: it adds the finalizer, patches whatever status reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done.
+// Reconcile does the writes: it adds the finalizer, patches whatever status reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done. Unlike Flux's patch helper, every write is locked to the version that was read: a merge patch replaces whole lists, so a reconciliation that started from a stale read would otherwise overwrite the inventory or other controllers' finalizers.
 func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var preview kuprav1alpha1.Preview
 	if err := r.Get(ctx, req.NamespacedName, &preview); err != nil {
@@ -112,7 +116,6 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		result, err = r.reconcile(ctx, &preview)
 	}
-	// The lock keeps a reconciliation that started from a stale read from writing stale status.
 	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
 		if apierrors.IsConflict(patchErr) && err == nil {
 			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
@@ -197,7 +200,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 		return ctrl.Result{}, err
 	}
-	if c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
+	if c := conditions.Get(&app, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
 		message := fmt.Sprintf("waiting for PreviewApp %s to be checked", app.Name)
 		if c != nil && c.ObservedGeneration == app.Generation {
 			message = fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message)
@@ -268,7 +271,8 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 
 	restored := plan.resources
-	applied, err := applyAll(ctx, applier, restored, true)
+	resources := ssa.NewResourceManager(applier, nil, templateOwner)
+	applied, err := applyAll(ctx, resources, p, restored, true)
 	var restoreSettling bool
 	if err == nil {
 		restoreSettling, err = r.recordRestore(ctx, p, applier, plan)
@@ -292,12 +296,12 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	if err == nil {
 		var appliedWorkload []kuprav1alpha1.InventoryEntry
-		appliedWorkload, err = applyAll(ctx, applier, workload, false)
+		appliedWorkload, err = applyAll(ctx, resources, p, workload, false)
 		applied = append(applied, appliedWorkload...)
 	}
 	var retained []kuprav1alpha1.InventoryEntry
 	if err == nil {
-		retained, err = r.prune(ctx, applier, nsName, p.Status.Inventory, applied)
+		retained, err = r.prune(ctx, resources, p, nsName, p.Status.Inventory, applied)
 	}
 	if err != nil {
 		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
@@ -339,9 +343,8 @@ func stallAfterTimeout(p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, 
 	if app.Spec.Timeout != nil {
 		timeout = app.Spec.Timeout.Duration
 	}
-	if c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReconcilingCondition); c != nil && time.Since(c.LastTransitionTime.Time) > timeout {
-		setCondition(&p.Status.Conditions, p.Generation, meta.StalledCondition, metav1.ConditionTrue, ReasonTimeout,
-			fmt.Sprintf("not ready after %s: %s", timeout, message))
+	if c := conditions.Get(p, meta.ReconcilingCondition); c != nil && time.Since(c.LastTransitionTime.Time) > timeout {
+		conditions.MarkTrue(p, meta.StalledCondition, ReasonTimeout, "not ready after %s: %s", timeout, message)
 	}
 }
 
@@ -482,6 +485,7 @@ func (r *PreviewReconciler) ensureApplyAccount(ctx context.Context, p *kuprav1al
 	return "", "", r.applyObject(ctx, r.Client, binding)
 }
 
+// impersonate returns a client that acts as one of kupra's service accounts. Flux's Impersonator builds clients from the process's kubeconfig and runs discovery for every one, so kupra builds its own from the manager's config and mapper.
 func (r *PreviewReconciler) impersonate(account string) (client.Client, error) {
 	cfg := rest.CopyConfig(r.Config)
 	cfg.Impersonate = rest.ImpersonationConfig{UserName: serviceaccount.MakeUsername(r.Namespace, account)}
@@ -508,12 +512,22 @@ func (r *PreviewReconciler) applyObject(ctx context.Context, c client.Client, ob
 	return nil
 }
 
-func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
+// templateOwner is how kupra applies template resources, and the prefix of the labels that mark them as a preview's.
+var templateOwner = ssa.Owner{Field: FieldManager, Group: "preview.kupra.futo.tech"}
+
+// applyAll applies a preview's resources and returns their inventory entries. They're applied one at a time, since ApplyAll doesn't report what it applied before an error.
+func applyAll(ctx context.Context, m *ssa.ResourceManager, p *kuprav1alpha1.Preview, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
 	var applied []kuprav1alpha1.InventoryEntry
 	var errs []error
 	for _, obj := range objs {
-		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
-			errs = append(errs, fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err))
+		obj = obj.DeepCopy()
+		m.SetOwnerLabels([]*unstructured.Unstructured{obj}, p.Name, p.Namespace)
+		entry, err := m.Apply(ctx, obj, ssa.DefaultApplyOptions())
+		if err == nil && entry.Action == ssa.UnchangedAction {
+			err = applyListMetadata(ctx, m.Client(), obj)
+		}
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: refOf(obj), State: isState})
@@ -521,9 +535,18 @@ func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstruc
 	return applied, errors.Join(errs...)
 }
 
-// prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted.
-func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
+func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {
+	ref := corev1.TypedLocalObjectReference{Kind: obj.GetKind(), Name: obj.GetName()}
+	if group := obj.GroupVersionKind().Group; group != "" {
+		ref.APIGroup = &group
+	}
+	return ref
+}
+
+// prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted. Only objects with the preview's owner labels are deleted.
+func (r *PreviewReconciler) prune(ctx context.Context, m *ssa.ResourceManager, p *kuprav1alpha1.Preview, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
 	var retained []kuprav1alpha1.InventoryEntry
+	var stale []*unstructured.Unstructured
 	var errs []error
 	for _, entry := range previous {
 		ref := entry.TypedLocalObjectReference
@@ -547,8 +570,13 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 		u.SetGroupVersionKind(mapping.GroupVersionKind)
 		u.SetNamespace(namespace)
 		u.SetName(ref.Name)
-		if err := c.Delete(ctx, u, client.PropagationPolicy(metav1.DeletePropagationBackground)); client.IgnoreNotFound(err) != nil {
-			errs = append(errs, fmt.Errorf("deleting %s %s: %w", ref.Kind, ref.Name, err))
+		stale = append(stale, u)
+	}
+	if len(stale) > 0 {
+		opts := ssa.DefaultDeleteOptions()
+		opts.Inclusions = m.GetOwnerLabels(p.Name, p.Namespace)
+		if _, err := m.DeleteAll(ctx, stale, opts); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return retained, errors.Join(errs...)
@@ -613,9 +641,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 
 	p.Status.ObservedGeneration = p.Generation
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonTerminating, "")
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, ReasonTerminating, "")
+	markReconciling(p, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
+	conditions.Delete(p, meta.StalledCondition)
 
 	var ns corev1.Namespace
 	gone := false
@@ -655,9 +683,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 
 func pending(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewPending
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, meta.StalledCondition, metav1.ConditionTrue, reason, message)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.ReconcilingCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
+	conditions.MarkTrue(p, meta.StalledCondition, reason, "%s", message)
+	conditions.Delete(p, meta.ReconcilingCondition)
 }
 
 func failed(p *kuprav1alpha1.Preview, reason, message string) {
@@ -672,24 +700,16 @@ func provisioning(p *kuprav1alpha1.Preview, message string) {
 
 func starting(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStarting
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, meta.ProgressingReason, message)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
+	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
+	markReconciling(p, meta.ProgressingReason, message)
+	conditions.Delete(p, meta.StalledCondition)
 }
 
 func running(p *kuprav1alpha1.Preview) {
 	p.Status.Phase = kuprav1alpha1.PreviewRunning
-	setCondition(&p.Status.Conditions, p.Generation, meta.ReadyCondition, metav1.ConditionTrue, meta.SucceededReason, "")
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.ReconcilingCondition)
-	apimeta.RemoveStatusCondition(&p.Status.Conditions, meta.StalledCondition)
-}
-
-func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {
-	ref := corev1.TypedLocalObjectReference{Kind: obj.GetKind(), Name: obj.GetName()}
-	if group := obj.GroupVersionKind().Group; group != "" {
-		ref.APIGroup = &group
-	}
-	return ref
+	conditions.MarkTrue(p, meta.ReadyCondition, meta.SucceededReason, "")
+	conditions.Delete(p, meta.ReconcilingCondition)
+	conditions.Delete(p, meta.StalledCondition)
 }
 
 func refGroup(ref corev1.TypedLocalObjectReference) string {
@@ -807,4 +827,99 @@ func (r *PreviewReconciler) previewsForSnapshot(ctx context.Context, obj client.
 		}
 	}
 	return requests
+}
+
+// markReconciling marks a preview as reconciling. Flux's setter counts a new message as a transition, so this keeps the time it started reconciling, which the timeout measures from.
+func markReconciling(p *kuprav1alpha1.Preview, reason, message string) {
+	var since metav1.Time
+	if c := conditions.Get(p, meta.ReconcilingCondition); c != nil && c.Status == metav1.ConditionTrue {
+		since = c.LastTransitionTime
+	}
+	conditions.MarkTrue(p, meta.ReconcilingCondition, reason, "%s", message)
+	if !since.IsZero() {
+		apimeta.FindStatusCondition(p.Status.Conditions, meta.ReconcilingCondition).LastTransitionTime = since
+	}
+}
+
+// applyListMetadata applies an object that ssa found unchanged if its finalizers or owner references changed, which ssa's drift detection ignores.
+func applyListMetadata(ctx context.Context, c client.Client, obj *unstructured.Unstructured) error {
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(obj.GroupVersionKind())
+	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !listMetadataDrifted(obj, live) {
+		return nil
+	}
+	if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
+		return fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err)
+	}
+	return nil
+}
+
+// listMetadataDrifted reports whether the live object lacks finalizers or owner references the object has, or has ones kupra applied that the object no longer has. Others, such as a controller's own finalizers, don't count.
+func listMetadataDrifted(obj, live *unstructured.Unstructured) bool {
+	liveKeys := listMetadataKeys(live)
+	keys := listMetadataKeys(obj)
+	for field, items := range keys {
+		for key := range items {
+			if !liveKeys[field][key] {
+				return true
+			}
+		}
+	}
+	// Owner references are keyed by UID, but their other fields can change too.
+	for _, ref := range obj.GetOwnerReferences() {
+		if !slices.ContainsFunc(live.GetOwnerReferences(), func(l metav1.OwnerReference) bool { return equality.Semantic.DeepEqual(l, ref) }) {
+			return true
+		}
+	}
+	for field, owned := range appliedListMetadataKeys(live) {
+		for key := range owned {
+			if !keys[field][key] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// listMetadataKeys returns an object's finalizers and owner references, keyed the way managed fields name them.
+func listMetadataKeys(obj *unstructured.Unstructured) map[string]map[string]bool {
+	keys := map[string]map[string]bool{"f:finalizers": {}, "f:ownerReferences": {}}
+	for _, f := range obj.GetFinalizers() {
+		v, _ := json.Marshal(f)
+		keys["f:finalizers"]["v:"+string(v)] = true
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		k, _ := json.Marshal(map[string]string{"uid": string(ref.UID)})
+		keys["f:ownerReferences"]["k:"+string(k)] = true
+	}
+	return keys
+}
+
+// appliedListMetadataKeys returns the finalizers and owner references kupra's field manager owns on a live object.
+func appliedListMetadataKeys(live *unstructured.Unstructured) map[string]map[string]bool {
+	keys := map[string]map[string]bool{}
+	for _, e := range live.GetManagedFields() {
+		if e.Manager != FieldManager || e.Operation != metav1.ManagedFieldsOperationApply || e.Subresource != "" || e.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]map[string]map[string]any
+		if json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields) != nil {
+			continue
+		}
+		for _, field := range []string{"f:finalizers", "f:ownerReferences"} {
+			for key := range fields["f:metadata"][field] {
+				if key == "." {
+					continue
+				}
+				if keys[field] == nil {
+					keys[field] = map[string]bool{}
+				}
+				keys[field][key] = true
+			}
+		}
+	}
+	return keys
 }
