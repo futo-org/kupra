@@ -232,6 +232,53 @@ template:
 		waitForPhase(t, "snapshots", "source", kuprav1alpha1.PreviewRunning, "Succeeded")
 	})
 
+	t.Run("reset requested during a capture", func(t *testing.T) {
+		during := &kuprav1alpha1.PreviewSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: "during", Namespace: "snapshots"},
+			Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "source"}}},
+		}
+		if err := k8s.Create(ctx, during); err != nil {
+			t.Fatal(err)
+		}
+		captured := waitForVolumeSnapshot(t, sourceNS, controller.LabelSnapshotUID, string(during.UID))
+		setReset := func(value string) {
+			t.Helper()
+			eventually(t, func() error {
+				p := getPreview(t, "snapshots", "source")
+				if value == "" {
+					delete(p.Annotations, controller.AnnotationResetRequestedAt)
+				} else {
+					if p.Annotations == nil {
+						p.Annotations = map[string]string{}
+					}
+					p.Annotations[controller.AnnotationResetRequestedAt] = value
+				}
+				return k8s.Update(ctx, p)
+			})
+		}
+		setReset("during")
+		eventually(t, func() error {
+			if p := getPreview(t, "snapshots", "source"); p.Status.PendingResetAt != "during" {
+				return fmt.Errorf("pendingResetAt = %q, want during", p.Status.PendingResetAt)
+			}
+			return nil
+		})
+		// Something else, such as Flux, removes the annotation while the reset waits for the capture.
+		setReset("")
+		takeSnapshot(t, captured, "handle-during")
+		moved := waitForVolumeSnapshot(t, "snapshots", controller.LabelSnapshotUID, string(during.UID))
+		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
+		waitForSnapshotPhase(t, "snapshots", "during", kuprav1alpha1.PreviewSnapshotSucceeded)
+		eventually(t, func() error {
+			finishDeletions(t, sourceNS)
+			p := getPreview(t, "snapshots", "source")
+			if p.Status.LastHandledResetAt != "during" || p.Status.PendingResetAt != "" || p.Status.Phase != kuprav1alpha1.PreviewRunning {
+				return fmt.Errorf("lastHandledResetAt %q, pendingResetAt %q, phase %s; want the reset handled", p.Status.LastHandledResetAt, p.Status.PendingResetAt, p.Status.Phase)
+			}
+			return nil
+		})
+	})
+
 	restored := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Name: "restored", Namespace: "snapshots"},
 		Spec: kuprav1alpha1.PreviewSpec{
@@ -679,6 +726,7 @@ func TestResetWithoutNamespace(t *testing.T) {
 	p := stalePreview("gone", "gone-uid")
 	p.Namespace = "resets"
 	p.Annotations = map[string]string{controller.AnnotationResetRequestedAt: "1"}
+	p.Status.PendingResetAt = "1"
 	p.Status.RestoredFrom = &meta.LocalObjectReference{Name: "base"}
 	p.Status.Inventory = []kuprav1alpha1.InventoryEntry{{TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: "data"}, State: true}}
 	apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{Type: controller.ConditionRestored, Status: metav1.ConditionTrue, Reason: "Succeeded"})

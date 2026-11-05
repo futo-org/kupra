@@ -20,7 +20,7 @@ So the lifecycle isn't a stored state with transitions. It's a set of rules, app
 | Request | Recorded as |
 | --- | --- |
 | Update | The Preview's `generation` is ahead of its `status.observedGeneration`. |
-| Reset | `kupra.futo.tech/reset-requested-at` differs from `status.lastHandledResetAt`. |
+| Reset | `status.pendingResetAt` is set, from a `kupra.futo.tech/reset-requested-at` that differs from `status.lastHandledResetAt`. |
 | Snapshot | A PreviewSnapshot refers to the preview, and hasn't succeeded or failed yet. |
 | Deletion | The Preview has a deletion timestamp, and kupra's finalizer holds it until cleanup is done. |
 

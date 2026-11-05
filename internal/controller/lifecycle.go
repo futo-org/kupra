@@ -211,10 +211,17 @@ func (r *PreviewReconciler) finishSnapshot(ctx context.Context, s *kuprav1alpha1
 	return client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
 
-// resetRequested reports whether a preview's reset annotation has an unhandled value.
-func resetRequested(p *kuprav1alpha1.Preview) bool {
+// recordResetRequest records a new value of the reset annotation in the preview's status, so the request survives the annotation being removed, such as by a GitOps tool that owns the Preview.
+func recordResetRequest(p *kuprav1alpha1.Preview) {
 	requested := p.Annotations[AnnotationResetRequestedAt]
-	return requested != "" && requested != p.Status.LastHandledResetAt
+	if requested != "" && requested != p.Status.LastHandledResetAt {
+		p.Status.PendingResetAt = requested
+	}
+}
+
+// resetRequested reports whether a preview has a reset that hasn't been handled.
+func resetRequested(p *kuprav1alpha1.Preview) bool {
+	return p.Status.PendingResetAt != ""
 }
 
 // reconcileReset removes a preview's app, state and restore copies, then records the reset as handled.
@@ -246,7 +253,8 @@ func (r *PreviewReconciler) finishReset(ctx context.Context, p *kuprav1alpha1.Pr
 	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return false, err
 	}
-	p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
+	p.Status.LastHandledResetAt = p.Status.PendingResetAt
+	p.Status.PendingResetAt = ""
 	p.Status.Inventory = nil
 	p.Status.RestoredFrom = nil
 	apimeta.RemoveStatusCondition(&p.Status.Conditions, ConditionRestored)
