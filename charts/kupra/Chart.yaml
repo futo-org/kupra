@@ -4,6 +4,7 @@ description: Preview environments with first-class state
 type: application
 version: 0.1.0
 appVersion: 0.1.0
+kubeVersion: ">=1.36.0-0"
 home: https://github.com/futo-org/kupra
 sources:
   - https://github.com/futo-org/kupra

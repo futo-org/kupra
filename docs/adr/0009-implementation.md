@@ -51,7 +51,7 @@ There are three layers of tests:
 
 ### Supported versions
 
-kupra needs Kubernetes 1.36 or newer, for the admission policy that records who created a preview ([ADR 6](0006-access-control.md)), along with the CSI snapshot API and a recent CloudNativePG. Kubernetes 1.34 and 1.35 work too, with the MutatingAdmissionPolicy feature gate enabled.
+kupra needs Kubernetes 1.36 or newer, for the admission policy that records who created a preview ([ADR 6](0006-access-control.md)), along with the CSI snapshot API and a recent CloudNativePG. Kubernetes 1.34 and 1.35 only serve MutatingAdmissionPolicy as a beta API, behind a feature gate and a runtime config flag, so they aren't supported.
 
 ## Alternatives considered
 
@@ -70,4 +70,4 @@ kupra needs Kubernetes 1.36 or newer, for the admission policy that records who 
 - kupra's versions of Kubernetes' own libraries have to stay compatible with those of the API modules it imports.
 - Supporting a kind of state from an operator that isn't written in Go means generating its types first.
 - One version covers every component.
-- Clusters older than Kubernetes 1.34 aren't supported.
+- Clusters older than Kubernetes 1.36 aren't supported.
