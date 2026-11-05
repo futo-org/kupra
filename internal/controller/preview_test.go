@@ -1,10 +1,19 @@
 package controller
 
 import (
+	"context"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
@@ -124,6 +133,67 @@ func TestNextCapture(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("next capture = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A reconciliation that starts from a stale read of a Preview doesn't overwrite what changed since: its inventory, or another controller's finalizer.
+func TestReconcileFromStaleRead(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kuprav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		stale func(*kuprav1alpha1.Preview)
+	}{
+		{"before kupra's finalizer", func(p *kuprav1alpha1.Preview) { p.Finalizers = nil }},
+		{"with kupra's finalizer", func(p *kuprav1alpha1.Preview) { p.Finalizers = []string{Finalizer} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			live := &kuprav1alpha1.Preview{
+				ObjectMeta: metav1.ObjectMeta{Name: "pr", Namespace: "ns", Finalizers: []string{Finalizer, "example.com/other"}},
+				Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
+				Status: kuprav1alpha1.PreviewStatus{Inventory: []kuprav1alpha1.InventoryEntry{
+					{TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: "ConfigMap", Name: "a"}},
+				}},
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(live).WithStatusSubresource(live).Build()
+			if err := c.Get(ctx, client.ObjectKeyFromObject(live), live); err != nil {
+				t.Fatal(err)
+			}
+			// The read the reconciliation starts from is a version behind.
+			stale := live.DeepCopy()
+			stale.Status.Inventory = nil
+			tc.stale(stale)
+			rv, _ := strconv.Atoi(live.ResourceVersion)
+			stale.ResourceVersion = strconv.Itoa(rv - 1)
+			r := &PreviewReconciler{Client: interceptor.NewClient(c, interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if p, ok := obj.(*kuprav1alpha1.Preview); ok {
+						stale.DeepCopyInto(p)
+						return nil
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			})}
+			r.APIReader = c
+			_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(live)})
+
+			var got kuprav1alpha1.Preview
+			if err := c.Get(ctx, client.ObjectKeyFromObject(live), &got); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(got.Finalizers, "example.com/other") {
+				t.Errorf("finalizers = %v, want the other controller's kept", got.Finalizers)
+			}
+			if len(got.Status.Inventory) != 1 {
+				t.Errorf("inventory = %v, want it kept", got.Status.Inventory)
 			}
 		})
 	}

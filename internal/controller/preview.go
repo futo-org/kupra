@@ -11,7 +11,6 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/conditions"
-	"github.com/fluxcd/pkg/runtime/patch"
 	"github.com/fluxcd/pkg/ssa"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -88,27 +87,25 @@ type PreviewReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;create;patch;delete
 // +kubebuilder:rbac:groups="",namespace=kupra-system,resources=serviceaccounts,verbs=get;create;patch;delete;impersonate
 
-// previewConditions are the conditions the PreviewReconciler owns.
-var previewConditions = patch.WithOwnedConditions{Conditions: []string{meta.ReadyCondition, meta.ReconcilingCondition, meta.StalledCondition, ConditionRestored}}
-
-// Reconcile does the writes: it adds the finalizer, patches whatever reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done.
+// Reconcile does the writes: it adds the finalizer, patches whatever status reconcile or reconcileDelete worked out, and removes the finalizer once cleanup is done. Unlike Flux's patch helper, every write is locked to the version that was read: a merge patch replaces whole lists, so a reconciliation that started from a stale read would otherwise overwrite the inventory or other controllers' finalizers.
 func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var preview kuprav1alpha1.Preview
 	if err := r.Get(ctx, req.NamespacedName, &preview); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	patcher := patch.NewSerialPatcher(&preview, r.Client)
 	deleting := !preview.DeletionTimestamp.IsZero()
 	switch {
 	case deleting && !controllerutil.ContainsFinalizer(&preview, Finalizer):
 		return ctrl.Result{}, nil
 	case !deleting && !controllerutil.ContainsFinalizer(&preview, Finalizer):
+		patch := client.MergeFromWithOptions(preview.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(&preview, Finalizer)
-		if err := patcher.Patch(ctx, &preview, previewConditions, patch.WithFieldOwner(FieldManager)); err != nil {
+		if err := r.Patch(ctx, &preview, patch); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
+	before := preview.DeepCopy()
 	var result ctrl.Result
 	var cleanedUp bool
 	var err error
@@ -117,14 +114,16 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	} else {
 		result, err = r.reconcile(ctx, &preview)
 	}
-	if cleanedUp {
-		controllerutil.RemoveFinalizer(&preview, Finalizer)
-	}
-	if patchErr := patcher.Patch(ctx, &preview, previewConditions, patch.WithFieldOwner(FieldManager)); patchErr != nil {
-		// Removing the finalizer can delete the Preview before its status is written.
-		if !cleanedUp || !apierrors.IsNotFound(patchErr) {
-			return ctrl.Result{}, errors.Join(err, patchErr)
+	if patchErr := r.Status().Patch(ctx, &preview, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); patchErr != nil {
+		if apierrors.IsConflict(patchErr) && err == nil {
+			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
 		}
+		return ctrl.Result{}, errors.Join(err, patchErr)
+	}
+	if cleanedUp {
+		patch := client.MergeFromWithOptions(preview.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		controllerutil.RemoveFinalizer(&preview, Finalizer)
+		return ctrl.Result{}, r.Patch(ctx, &preview, patch)
 	}
 	return result, err
 }
