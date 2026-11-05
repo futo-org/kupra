@@ -510,31 +510,28 @@ func (r *PreviewReconciler) applyObject(ctx context.Context, c client.Client, ob
 // templateOwner is how kupra applies template resources, and the prefix of the labels that mark them as a preview's.
 var templateOwner = ssa.Owner{Field: FieldManager, Group: "preview.kupra.futo.tech"}
 
-// applyAll applies a preview's resources and returns their inventory entries, including those applied before an error.
+// applyAll applies a preview's resources and returns their inventory entries. They're applied one at a time, since ApplyAll doesn't report what it applied before an error.
 func applyAll(ctx context.Context, m *ssa.ResourceManager, p *kuprav1alpha1.Preview, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
-	if len(objs) == 0 {
-		return nil, nil
-	}
-	copies := make([]*unstructured.Unstructured, len(objs))
-	for i, obj := range objs {
-		copies[i] = obj.DeepCopy()
-	}
-	m.SetOwnerLabels(copies, p.Name, p.Namespace)
-	changes, err := m.ApplyAll(ctx, copies, ssa.DefaultApplyOptions())
 	var applied []kuprav1alpha1.InventoryEntry
-	if changes != nil {
-		for _, c := range changes.Entries {
-			if c.Action == ssa.UnknownAction || c.Action == ssa.SkippedAction {
-				continue
-			}
-			ref := corev1.TypedLocalObjectReference{Kind: c.ObjMetadata.GroupKind.Kind, Name: c.ObjMetadata.Name}
-			if group := c.ObjMetadata.GroupKind.Group; group != "" {
-				ref.APIGroup = &group
-			}
-			applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: ref, State: isState})
+	var errs []error
+	for _, obj := range objs {
+		obj = obj.DeepCopy()
+		m.SetOwnerLabels([]*unstructured.Unstructured{obj}, p.Name, p.Namespace)
+		if _, err := m.Apply(ctx, obj, ssa.DefaultApplyOptions()); err != nil {
+			errs = append(errs, err)
+			continue
 		}
+		applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: refOf(obj), State: isState})
 	}
-	return applied, err
+	return applied, errors.Join(errs...)
+}
+
+func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {
+	ref := corev1.TypedLocalObjectReference{Kind: obj.GetKind(), Name: obj.GetName()}
+	if group := obj.GroupVersionKind().Group; group != "" {
+		ref.APIGroup = &group
+	}
+	return ref
 }
 
 // prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted. Only objects with the preview's owner labels are deleted.
@@ -636,7 +633,7 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	p.Status.ObservedGeneration = p.Generation
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
 	conditions.MarkFalse(p, meta.ReadyCondition, ReasonTerminating, "")
-	conditions.MarkTrue(p, meta.ReconcilingCondition, ReasonTerminating, "%s", fmt.Sprintf("deleting namespace %s", nsName))
+	markReconciling(p, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
 	conditions.Delete(p, meta.StalledCondition)
 
 	var ns corev1.Namespace
@@ -695,7 +692,7 @@ func provisioning(p *kuprav1alpha1.Preview, message string) {
 func starting(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStarting
 	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
-	conditions.MarkTrue(p, meta.ReconcilingCondition, meta.ProgressingReason, "%s", message)
+	markReconciling(p, meta.ProgressingReason, message)
 	conditions.Delete(p, meta.StalledCondition)
 }
 
@@ -821,4 +818,16 @@ func (r *PreviewReconciler) previewsForSnapshot(ctx context.Context, obj client.
 		}
 	}
 	return requests
+}
+
+// markReconciling marks a preview as reconciling. Flux's setter counts a new message as a transition, so this keeps the time it started reconciling, which the timeout measures from.
+func markReconciling(p *kuprav1alpha1.Preview, reason, message string) {
+	var since metav1.Time
+	if c := conditions.Get(p, meta.ReconcilingCondition); c != nil && c.Status == metav1.ConditionTrue {
+		since = c.LastTransitionTime
+	}
+	conditions.MarkTrue(p, meta.ReconcilingCondition, reason, "%s", message)
+	if !since.IsZero() {
+		apimeta.FindStatusCondition(p.Status.Conditions, meta.ReconcilingCondition).LastTransitionTime = since
+	}
 }
