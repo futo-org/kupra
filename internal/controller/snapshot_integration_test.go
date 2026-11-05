@@ -763,3 +763,58 @@ func TestResetWithoutNamespace(t *testing.T) {
 		t.Errorf("snapshot finalizers = %v, want the hold released", snap.Finalizers)
 	}
 }
+
+// A tool that server-side applies the Preview, without forcing, can request one reset after another: kupra gives up the request once it's handled.
+func TestResetsByServerSideApply(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	createNamespace(t, "ssa-resets", nil)
+	createApp(t, "ssa-resets", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+`)
+	apply := func(reset string) error {
+		u := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": kuprav1alpha1.GroupVersion.String(),
+			"kind":       "Preview",
+			"metadata": map[string]any{
+				"name":        "pr",
+				"namespace":   "ssa-resets",
+				"annotations": map[string]any{controller.AnnotationResetRequestedAt: reset},
+			},
+			"spec": map[string]any{"appRef": map[string]any{"name": "app"}},
+		}}
+		return k8s.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner("gitops"))
+	}
+	handled := func(reset string) {
+		t.Helper()
+		eventually(t, func() error {
+			p := getPreview(t, "ssa-resets", "pr")
+			if p.Status.Namespace != "" {
+				finishDeletions(t, p.Status.Namespace)
+			}
+			if p.Status.LastHandledResetAt != reset {
+				return fmt.Errorf("lastHandledResetAt = %q, want %s", p.Status.LastHandledResetAt, reset)
+			}
+			for _, e := range p.ManagedFields {
+				if e.Manager == controller.FieldManager && strings.Contains(e.FieldsV1.GetRawString(), controller.AnnotationResetRequestedAt) {
+					return fmt.Errorf("kupra still owns the handled reset request")
+				}
+			}
+			return nil
+		})
+	}
+
+	if err := apply("a"); err != nil {
+		t.Fatal(err)
+	}
+	handled("a")
+	if err := apply("b"); err != nil {
+		t.Fatalf("applying the next reset request: %v", err)
+	}
+	handled("b")
+}

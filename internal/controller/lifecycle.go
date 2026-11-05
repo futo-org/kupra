@@ -220,16 +220,20 @@ func resetRequested(p *kuprav1alpha1.Preview) bool {
 	return requested != "" && requested != p.Status.LastHandledResetAt
 }
 
-// claimResetRequest takes ownership of an unhandled reset request with server-side apply, so the annotation stays while the reset waits, even if the field manager that set it is taken over and drops it, as Flux does with kubectl's. It reports whether it changed the Preview.
+// claimResetRequest takes ownership of an unhandled reset request with server-side apply, so the annotation stays while the reset waits, even if the field manager that set it is taken over and drops it, as Flux does with kubectl's. Once the reset is handled, it gives ownership up again, so the request's own applier can change it without conflicting with kupra. It reports whether it changed the Preview.
 func (r *PreviewReconciler) claimResetRequest(ctx context.Context, p *kuprav1alpha1.Preview) (bool, error) {
-	if !resetRequested(p) || ownsAnnotation(p, FieldManager, AnnotationResetRequestedAt) {
+	owned := ownsAnnotation(p, FieldManager, AnnotationResetRequestedAt)
+	if resetRequested(p) == owned {
 		return false, nil
 	}
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(kuprav1alpha1.GroupVersion.WithKind("Preview"))
 	u.SetNamespace(p.Namespace)
 	u.SetName(p.Name)
-	u.SetAnnotations(map[string]string{AnnotationResetRequestedAt: p.Annotations[AnnotationResetRequestedAt]})
+	// lastHandledResetAt has been written by now, so releasing can't lose the request, even if kupra was its only owner and the annotation goes.
+	if !owned {
+		u.SetAnnotations(map[string]string{AnnotationResetRequestedAt: p.Annotations[AnnotationResetRequestedAt]})
+	}
 	if err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(FieldManager)); err != nil {
 		// Another applier owns a different value.
 		if apierrors.IsConflict(err) {
