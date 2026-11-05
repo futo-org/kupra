@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,6 +21,9 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
@@ -196,5 +200,42 @@ func TestReconcileFromStaleRead(t *testing.T) {
 				t.Errorf("inventory = %v, want it kept", got.Status.Inventory)
 			}
 		})
+// A capture records the parameter defaults of the PreviewApp that rendered the preview, even if the stored one has changed since.
+func TestStartCaptureRecordsRenderedDefaults(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := kuprav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	v1, v2 := "v1", "v2"
+	stored := &kuprav1alpha1.PreviewApp{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "ns"},
+		Spec:       kuprav1alpha1.PreviewAppSpec{Parameters: []kuprav1alpha1.Parameter{{Name: "tag", Default: &v2}}},
+	}
+	rendered := stored.DeepCopy()
+	rendered.Spec.Parameters[0].Default = &v1
+	p := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "pr", Namespace: "ns"},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}, Parameters: map[string]string{"title": "main"}},
+	}
+	s := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "snap", Namespace: "ns", Finalizers: []string{Finalizer}},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "pr"}}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stored, s).WithStatusSubresource(s).
+		WithIndex(&kuprav1alpha1.PreviewSnapshot{}, sourceIndex, func(obj client.Object) []string {
+			return []string{obj.(*kuprav1alpha1.PreviewSnapshot).Spec.Source.PreviewRef.Name}
+		}).Build()
+	r := &PreviewReconciler{Client: c}
+
+	started, err := r.startCapture(ctx, p, rendered)
+	if err != nil || !started {
+		t.Fatalf("startCapture = %v, %v; want started", started, err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(s), s); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"tag": "v1", "title": "main"}; !maps.Equal(s.Status.Parameters, want) {
+		t.Errorf("parameters = %v, want %v", s.Status.Parameters, want)
 	}
 }
