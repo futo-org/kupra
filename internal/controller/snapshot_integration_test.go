@@ -342,6 +342,13 @@ template:
 			if len(copies.Items) > 0 {
 				return fmt.Errorf("%d restore copies of the deleted snapshot are left", len(copies.Items))
 			}
+			var contents snapshotv1.VolumeSnapshotContentList
+			if err := k8s.List(ctx, &contents, client.MatchingLabels{controller.LabelPreviewUID: string(restoredPreview.UID)}); err != nil {
+				return err
+			}
+			if len(contents.Items) > 0 {
+				return fmt.Errorf("%d retained contents of the deleted snapshot's restore copies are left", len(contents.Items))
+			}
 			return nil
 		})
 	})
