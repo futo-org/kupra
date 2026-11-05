@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -516,7 +517,11 @@ func applyAll(ctx context.Context, m *ssa.ResourceManager, p *kuprav1alpha1.Prev
 	for _, obj := range objs {
 		obj = obj.DeepCopy()
 		m.SetOwnerLabels([]*unstructured.Unstructured{obj}, p.Name, p.Namespace)
-		if _, err := m.Apply(ctx, obj, ssa.DefaultApplyOptions()); err != nil {
+		entry, err := m.Apply(ctx, obj, ssa.DefaultApplyOptions())
+		if err == nil && entry.Action == ssa.UnchangedAction {
+			err = applyListMetadata(ctx, m.Client(), obj)
+		}
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -829,4 +834,81 @@ func markReconciling(p *kuprav1alpha1.Preview, reason, message string) {
 	if !since.IsZero() {
 		apimeta.FindStatusCondition(p.Status.Conditions, meta.ReconcilingCondition).LastTransitionTime = since
 	}
+}
+
+// applyListMetadata applies an object that ssa found unchanged if its finalizers or owner references changed, which ssa's drift detection ignores.
+func applyListMetadata(ctx context.Context, c client.Client, obj *unstructured.Unstructured) error {
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(obj.GroupVersionKind())
+	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !listMetadataDrifted(obj, live) {
+		return nil
+	}
+	if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
+		return fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err)
+	}
+	return nil
+}
+
+// listMetadataDrifted reports whether the live object lacks finalizers or owner references the object has, or has ones kupra applied that the object no longer has. Others, such as a controller's own finalizers, don't count.
+func listMetadataDrifted(obj, live *unstructured.Unstructured) bool {
+	liveKeys := listMetadataKeys(live)
+	keys := listMetadataKeys(obj)
+	for field, items := range keys {
+		for key := range items {
+			if !liveKeys[field][key] {
+				return true
+			}
+		}
+	}
+	for field, owned := range appliedListMetadataKeys(live) {
+		for key := range owned {
+			if !keys[field][key] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// listMetadataKeys returns an object's finalizers and owner references, keyed the way managed fields name them.
+func listMetadataKeys(obj *unstructured.Unstructured) map[string]map[string]bool {
+	keys := map[string]map[string]bool{"f:finalizers": {}, "f:ownerReferences": {}}
+	for _, f := range obj.GetFinalizers() {
+		v, _ := json.Marshal(f)
+		keys["f:finalizers"]["v:"+string(v)] = true
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		k, _ := json.Marshal(map[string]string{"uid": string(ref.UID)})
+		keys["f:ownerReferences"]["k:"+string(k)] = true
+	}
+	return keys
+}
+
+// appliedListMetadataKeys returns the finalizers and owner references kupra's field manager owns on a live object.
+func appliedListMetadataKeys(live *unstructured.Unstructured) map[string]map[string]bool {
+	keys := map[string]map[string]bool{}
+	for _, e := range live.GetManagedFields() {
+		if e.Manager != FieldManager || e.Operation != metav1.ManagedFieldsOperationApply || e.Subresource != "" || e.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]map[string]map[string]any
+		if json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields) != nil {
+			continue
+		}
+		for _, field := range []string{"f:finalizers", "f:ownerReferences"} {
+			for key := range fields["f:metadata"][field] {
+				if key == "." {
+					continue
+				}
+				if keys[field] == nil {
+					keys[field] = map[string]bool{}
+				}
+				keys[field][key] = true
+			}
+		}
+	}
+	return keys
 }

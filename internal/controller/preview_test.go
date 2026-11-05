@@ -21,6 +21,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
@@ -174,6 +175,8 @@ func TestReconcileFromStaleRead(t *testing.T) {
 			tc.stale(stale)
 			rv, _ := strconv.Atoi(live.ResourceVersion)
 			stale.ResourceVersion = strconv.Itoa(rv - 1)
+			// Every status write must be conditional on the version that was read.
+			var statusPatches []string
 			r := &PreviewReconciler{Client: interceptor.NewClient(c, interceptor.Funcs{
 				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 					if p, ok := obj.(*kuprav1alpha1.Preview); ok {
@@ -181,6 +184,14 @@ func TestReconcileFromStaleRead(t *testing.T) {
 						return nil
 					}
 					return c.Get(ctx, key, obj, opts...)
+				},
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					data, err := patch.Data(obj)
+					if err != nil {
+						return err
+					}
+					statusPatches = append(statusPatches, string(data))
+					return c.SubResource(subResource).Patch(ctx, obj, patch, opts...)
 				},
 			})}
 			r.APIReader = c
@@ -195,6 +206,42 @@ func TestReconcileFromStaleRead(t *testing.T) {
 			}
 			if len(got.Status.Inventory) != 1 {
 				t.Errorf("inventory = %v, want it kept", got.Status.Inventory)
+			}
+			if slices.Contains(stale.Finalizers, Finalizer) && len(statusPatches) == 0 {
+				t.Error("no status was written, so its precondition wasn't checked")
+			}
+			for _, patch := range statusPatches {
+				if !strings.Contains(patch, `"resourceVersion":"`+stale.ResourceVersion+`"`) {
+					t.Errorf("status patch %s isn't conditional on the version that was read", patch)
+				}
+			}
+		})
+	}
+}
+
+func TestListMetadataDrifted(t *testing.T) {
+	object := func(finalizers []string, applied string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetFinalizers(finalizers)
+		if applied != "" {
+			u.SetManagedFields([]metav1.ManagedFieldsEntry{{Manager: FieldManager, Operation: metav1.ManagedFieldsOperationApply, FieldsV1: metav1.NewFieldsV1(applied)}})
+		}
+		return u
+	}
+	appliedA := `{"f:metadata":{"f:finalizers":{".":{},"v:\"example.com/a\"":{}}}}`
+	for _, tc := range []struct {
+		name      string
+		obj, live *unstructured.Unstructured
+		want      bool
+	}{
+		{"unchanged", object([]string{"example.com/a"}, ""), object([]string{"example.com/a"}, appliedA), false},
+		{"added", object([]string{"example.com/a"}, ""), object(nil, ""), true},
+		{"removed from the template", object(nil, ""), object([]string{"example.com/a"}, appliedA), true},
+		{"another controller's", object(nil, ""), object([]string{"kubernetes.io/pvc-protection"}, ""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := listMetadataDrifted(tc.obj, tc.live); got != tc.want {
+				t.Errorf("listMetadataDrifted = %v, want %v", got, tc.want)
 			}
 		})
 	}
