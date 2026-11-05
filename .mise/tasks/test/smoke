@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#MISE description="Check that the installed operator reconciles a Preview"
+set -euo pipefail
+
+export KUBECONFIG="$PWD/.e2e/kubeconfig"
+namespace=kupra-smoke
+k() { kubectl --context kind-kupra-e2e "$@"; }
+
+# The end-to-end tests scale the installed operator down.
+k -n kupra-system scale deployment/kupra-operator --replicas=1
+k -n kupra-system rollout status deployment/kupra-operator --timeout=120s
+
+k create namespace "$namespace" --dry-run=client -o yaml | k apply --server-side -f -
+trap 'k delete namespace "$namespace" --ignore-not-found --wait=false' EXIT
+k -n "$namespace" apply --server-side -f - <<'YAML'
+apiVersion: kupra.futo.tech/v1alpha1
+kind: PreviewApp
+metadata:
+  name: smoke
+spec:
+  template:
+    resources:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: smoke
+        data:
+          greeting: hello
+---
+apiVersion: kupra.futo.tech/v1alpha1
+kind: Preview
+metadata:
+  name: smoke
+spec:
+  appRef:
+    name: smoke
+YAML
+k -n "$namespace" wait --for condition=Ready --timeout=120s preview/smoke
+k -n "$namespace" delete preview/smoke --timeout=120s

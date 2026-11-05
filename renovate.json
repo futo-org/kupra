@@ -1,4 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>immich-app/.github:renovate-config"]
+  "extends": ["github>immich-app/.github:renovate-config"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "ko's base image",
+      "managerFilePatterns": ["/^\\.ko\\.yaml$/"],
+      "matchStrings": ["defaultBaseImage: (?<depName>[^:@\\s]+):(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchFileNames": [".ko.yaml"],
+      "pinDigests": true
+    }
+  ]
 }

@@ -28,6 +28,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/controller"
+	"github.com/futo-org/kupra/internal/policy"
 )
 
 const kupraNamespace = "kupra-system"
@@ -138,13 +139,23 @@ func eventually(t *testing.T, check func() error) {
 // setUpPolicies applies kupra's template roles and the chart's default PreviewPolicy, and creates any other PreviewPolicies given, unless they exist already. envtest has no controller-manager to aggregate ClusterRoles, so the default policy points at the rules directly.
 func setUpPolicies(t *testing.T, policies ...*kuprav1alpha1.PreviewPolicy) {
 	t.Helper()
-	templates := filepath.Join("..", "..", "charts", "kupra", "templates")
-	apply(t, filepath.Join(templates, "template-clusterroles.yaml"))
-	data, err := os.ReadFile(filepath.Join(templates, "default-policy.yaml"))
+	chart := filepath.Join("..", "..", "charts", "kupra")
+	apply(t, filepath.Join(chart, "templates", "template-clusterroles.yaml"))
+	data, err := os.ReadFile(filepath.Join(chart, "values.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	applyYAML(t, bytes.ReplaceAll(data, []byte("name: kupra-preview-template\n"), []byte("name: kupra-preview-template-base\n")))
+	var values struct {
+		DefaultPolicy kuprav1alpha1.PreviewPolicySpec `json:"defaultPolicy"`
+	}
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		t.Fatal(err)
+	}
+	def := &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: policy.DefaultName}, Spec: values.DefaultPolicy}
+	def.Spec.Apply.ClusterRoleRef.Name = "kupra-preview-template-base"
+	if err := k8s.Create(context.Background(), def); err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
+	}
 	for _, p := range policies {
 		if err := k8s.Create(context.Background(), p); err != nil && !apierrors.IsAlreadyExists(err) {
 			t.Fatal(err)
