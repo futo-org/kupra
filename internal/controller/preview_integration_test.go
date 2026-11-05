@@ -256,6 +256,11 @@ template:
 		if err := k8s.Create(ctx, long); err == nil {
 			t.Error("creating a Preview with a 64 character name succeeded, want it rejected")
 		}
+		// Namespaces select a policy with a label.
+		policy := &kuprav1alpha1.PreviewPolicy{ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("a", 64)}}
+		if err := k8s.Create(ctx, policy, client.DryRunAll); err == nil {
+			t.Error("creating a PreviewPolicy with a 64 character name succeeded, want it rejected")
+		}
 	})
 
 	t.Run("policy change while the app is missing", func(t *testing.T) {
