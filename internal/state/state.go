@@ -105,6 +105,9 @@ var kinds = map[schema.GroupKind]Kind{
 	{Group: backupGVK.Group, Kind: "Cluster"}: cnpgCluster{},
 }
 
+// Leftovers are the kinds of objects, besides VolumeSnapshots and their contents, that a capture which doesn't finish can leave behind. They have the capture's labels, and deleting them deletes what they hold.
+var Leftovers = []schema.GroupVersionKind{backupGVK}
+
 // For returns the support for a kind, if there is any.
 func For(gk schema.GroupKind) (Kind, bool) {
 	k, ok := kinds[gk]

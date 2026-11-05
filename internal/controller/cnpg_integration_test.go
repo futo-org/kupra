@@ -59,6 +59,26 @@ func waitForVolumeSnapshots(t *testing.T, namespace, label, uid string, n int) [
 	return list.Items
 }
 
+// waitForBackup waits for the Backup a PreviewSnapshot's capture asks CloudNativePG for.
+func waitForBackup(t *testing.T, namespace string, snap *kuprav1alpha1.PreviewSnapshot) *unstructured.Unstructured {
+	t.Helper()
+	var backup *unstructured.Unstructured
+	eventually(t, func() error {
+		var list unstructured.UnstructuredList
+		list.SetAPIVersion("postgresql.cnpg.io/v1")
+		list.SetKind("BackupList")
+		if err := k8s.List(context.Background(), &list, client.InNamespace(namespace), client.MatchingLabels{controller.LabelSnapshotUID: string(snap.UID)}); err != nil {
+			return err
+		}
+		if len(list.Items) != 1 {
+			return fmt.Errorf("%d Backups, want 1", len(list.Items))
+		}
+		backup = &list.Items[0]
+		return nil
+	})
+	return backup
+}
+
 // waitForNamespace waits for a preview's namespace to be recorded.
 func waitForNamespace(t *testing.T, namespace, name string) string {
 	t.Helper()
@@ -114,20 +134,7 @@ template:
 
 	var moved []snapshotv1.VolumeSnapshot
 	if !t.Run("capture", func(t *testing.T) {
-		var backup *unstructured.Unstructured
-		eventually(t, func() error {
-			var list unstructured.UnstructuredList
-			list.SetAPIVersion("postgresql.cnpg.io/v1")
-			list.SetKind("BackupList")
-			if err := k8s.List(ctx, &list, client.InNamespace(sourceNS), client.MatchingLabels{controller.LabelSnapshotUID: string(snap.UID)}); err != nil {
-				return err
-			}
-			if len(list.Items) != 1 {
-				return fmt.Errorf("%d Backups, want 1", len(list.Items))
-			}
-			backup = &list.Items[0]
-			return nil
-		})
+		backup := waitForBackup(t, sourceNS, snap)
 		if online, _, _ := unstructured.NestedBool(backup.Object, "spec", "online"); online {
 			t.Error("Backup is online, want it offline for an Offline capture")
 		}
@@ -202,5 +209,32 @@ template:
 		markClusterReady(t, ns, "database")
 		waitForRestored(t, "cnpg", "restored", metav1.ConditionTrue, "restored from PreviewSnapshot base")
 		waitForPhase(t, "cnpg", "restored", kuprav1alpha1.PreviewRunning, "Succeeded")
+	})
+
+	t.Run("failed capture", func(t *testing.T) {
+		failed := &kuprav1alpha1.PreviewSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: "failed", Namespace: "cnpg"},
+			Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "source"}}},
+		}
+		if err := k8s.Create(ctx, failed); err != nil {
+			t.Fatal(err)
+		}
+		backup := waitForBackup(t, sourceNS, failed)
+		backup.Object["status"] = map[string]any{"phase": "failed", "error": "no space left"}
+		if err := k8s.Status().Update(ctx, backup); err != nil {
+			t.Fatal(err)
+		}
+		waitForSnapshotPhase(t, "cnpg", "failed", kuprav1alpha1.PreviewSnapshotFailed)
+
+		// Deleting the PreviewSnapshot deletes its Backup, and with it the VolumeSnapshots CloudNativePG took.
+		if err := k8s.Delete(ctx, failed); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, func() error {
+			if err := k8s.Get(ctx, client.ObjectKeyFromObject(backup), backup); !apierrors.IsNotFound(err) {
+				return fmt.Errorf("Backup still exists (%v)", err)
+			}
+			return nil
+		})
 	})
 }
