@@ -314,7 +314,7 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	if ready {
 		running(p)
-		if started, err := r.startCapture(ctx, p); err != nil {
+		if started, err := r.startCapture(ctx, p, &app); err != nil {
 			return ctrl.Result{}, err
 		} else if started {
 			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
