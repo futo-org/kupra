@@ -133,6 +133,10 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
 	observedGeneration := p.Status.ObservedGeneration
 	p.Status.ObservedGeneration = p.Generation
+	if claimed, err := r.claimResetRequest(ctx, p); err != nil || claimed {
+		// The Preview changed, so start again from a fresh read.
+		return ctrl.Result{RequeueAfter: nextStepInterval}, err
+	}
 	nsName := names.PreviewNamespace(p.Namespace, p.Name)
 	p.Status.Namespace = nsName
 

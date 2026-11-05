@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
@@ -230,6 +231,72 @@ template:
 			return nil
 		})
 		waitForPhase(t, "snapshots", "source", kuprav1alpha1.PreviewRunning, "Succeeded")
+	})
+
+	t.Run("reset requested during a capture", func(t *testing.T) {
+		during := &kuprav1alpha1.PreviewSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: "during", Namespace: "snapshots"},
+			Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "source"}}},
+		}
+		if err := k8s.Create(ctx, during); err != nil {
+			t.Fatal(err)
+		}
+		captured := waitForVolumeSnapshot(t, sourceNS, controller.LabelSnapshotUID, string(during.UID))
+		// kubectl annotate sets the request.
+		eventually(t, func() error {
+			p := getPreview(t, "snapshots", "source")
+			if p.Annotations == nil {
+				p.Annotations = map[string]string{}
+			}
+			p.Annotations[controller.AnnotationResetRequestedAt] = "during"
+			return k8s.Update(ctx, p, client.FieldOwner("kubectl-annotate"))
+		})
+		eventually(t, func() error {
+			p := getPreview(t, "snapshots", "source")
+			for _, e := range p.ManagedFields {
+				if e.Manager == controller.FieldManager && e.Operation == metav1.ManagedFieldsOperationApply && strings.Contains(e.FieldsV1.GetRawString(), controller.AnnotationResetRequestedAt) {
+					return nil
+				}
+			}
+			return fmt.Errorf("kupra hasn't claimed the reset request")
+		})
+		// Flux, which owns the Preview, takes over kubectl's fields and applies the Preview without the annotation.
+		// This is what fluxcd/pkg/ssa does with kubectl's managed fields before it applies.
+		eventually(t, func() error {
+			p := getPreview(t, "snapshots", "source")
+			fields := p.GetManagedFields()
+			for i, e := range fields {
+				if strings.HasPrefix(e.Manager, "kubectl") && e.Operation == metav1.ManagedFieldsOperationUpdate {
+					fields[i].Manager, fields[i].Operation = "flux", metav1.ManagedFieldsOperationApply
+				}
+			}
+			p.SetManagedFields(fields)
+			return k8s.Update(ctx, p)
+		})
+		manifest := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": kuprav1alpha1.GroupVersion.String(),
+			"kind":       "Preview",
+			"metadata":   map[string]any{"name": "source", "namespace": "snapshots"},
+			"spec":       map[string]any{"appRef": map[string]any{"name": "app"}},
+		}}
+		if err := k8s.Apply(ctx, client.ApplyConfigurationFromUnstructured(manifest), client.FieldOwner("flux"), client.ForceOwnership); err != nil {
+			t.Fatal(err)
+		}
+		if p := getPreview(t, "snapshots", "source"); p.Annotations[controller.AnnotationResetRequestedAt] != "during" {
+			t.Errorf("annotations = %v after Flux applied the Preview, want the reset request kept", p.Annotations)
+		}
+		takeSnapshot(t, captured, "handle-during")
+		moved := waitForVolumeSnapshot(t, "snapshots", controller.LabelSnapshotUID, string(during.UID))
+		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
+		waitForSnapshotPhase(t, "snapshots", "during", kuprav1alpha1.PreviewSnapshotSucceeded)
+		eventually(t, func() error {
+			finishDeletions(t, sourceNS)
+			p := getPreview(t, "snapshots", "source")
+			if p.Status.LastHandledResetAt != "during" || p.Status.Phase != kuprav1alpha1.PreviewRunning {
+				return fmt.Errorf("lastHandledResetAt %q, phase %s; want the reset handled", p.Status.LastHandledResetAt, p.Status.Phase)
+			}
+			return nil
+		})
 	})
 
 	restored := &kuprav1alpha1.Preview{
@@ -718,5 +785,87 @@ func TestResetWithoutNamespace(t *testing.T) {
 	}
 	if slices.Contains(snap.Finalizers, controller.RestoreFinalizerPrefix+"gone-uid") {
 		t.Errorf("snapshot finalizers = %v, want the hold released", snap.Finalizers)
+	}
+}
+
+// A tool that server-side applies the Preview, without forcing, can request one reset after another: kupra gives up the request once it's handled.
+func TestResetsByServerSideApply(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	createNamespace(t, "ssa-resets", nil)
+	createApp(t, "ssa-resets", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+`)
+	apply := func(reset string) error {
+		u := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": kuprav1alpha1.GroupVersion.String(),
+			"kind":       "Preview",
+			"metadata": map[string]any{
+				"name":        "pr",
+				"namespace":   "ssa-resets",
+				"annotations": map[string]any{controller.AnnotationResetRequestedAt: reset},
+			},
+			"spec": map[string]any{"appRef": map[string]any{"name": "app"}},
+		}}
+		return k8s.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner("gitops"))
+	}
+	handled := func(reset string) {
+		t.Helper()
+		eventually(t, func() error {
+			p := getPreview(t, "ssa-resets", "pr")
+			if p.Status.Namespace != "" {
+				finishDeletions(t, p.Status.Namespace)
+			}
+			if p.Status.LastHandledResetAt != reset {
+				return fmt.Errorf("lastHandledResetAt = %q, want %s", p.Status.LastHandledResetAt, reset)
+			}
+			for _, e := range p.ManagedFields {
+				if e.Manager == controller.FieldManager && strings.Contains(e.FieldsV1.GetRawString(), controller.AnnotationResetRequestedAt) {
+					return fmt.Errorf("kupra still owns the handled reset request")
+				}
+			}
+			return nil
+		})
+	}
+
+	if err := apply("a"); err != nil {
+		t.Fatal(err)
+	}
+	handled("a")
+	if err := apply("b"); err != nil {
+		t.Fatalf("applying the next reset request: %v", err)
+	}
+	handled("b")
+}
+
+// A reset request removed after kupra read the Preview isn't put back by kupra's claim on it.
+func TestClaimAfterRemoval(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "claims", nil)
+	p := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "pr", Namespace: "claims", Annotations: map[string]string{controller.AnnotationResetRequestedAt: "x"}},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "missing"}},
+	}
+	if err := k8s.Create(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	stale := p.DeepCopy()
+	eventually(t, func() error {
+		got := getPreview(t, "claims", "pr")
+		delete(got.Annotations, controller.AnnotationResetRequestedAt)
+		return k8s.Update(ctx, got)
+	})
+
+	r := &controller.PreviewReconciler{Client: k8s}
+	if _, err := r.ClaimResetRequest(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	if got := getPreview(t, "claims", "pr"); got.Annotations[controller.AnnotationResetRequestedAt] != "" {
+		t.Errorf("annotations = %v, want the removed reset request to stay removed", got.Annotations)
 	}
 }

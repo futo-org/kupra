@@ -292,3 +292,27 @@ func TestStartCaptureRecordsRenderedDefaults(t *testing.T) {
 		t.Errorf("parameters = %v, want %v", s.Status.Parameters, want)
 	}
 }
+
+func TestOwnsAnnotation(t *testing.T) {
+	entry := func(manager string, op metav1.ManagedFieldsOperationType, fields string) metav1.ManagedFieldsEntry {
+		return metav1.ManagedFieldsEntry{Manager: manager, Operation: op, FieldsV1: metav1.NewFieldsV1(fields)}
+	}
+	owned := `{"f:metadata":{"f:annotations":{"f:kupra.futo.tech/reset-requested-at":{}}}}`
+	for _, tc := range []struct {
+		name    string
+		entries []metav1.ManagedFieldsEntry
+		want    bool
+	}{
+		{"applied by kupra", []metav1.ManagedFieldsEntry{entry(FieldManager, metav1.ManagedFieldsOperationApply, owned)}, true},
+		{"set by kubectl", []metav1.ManagedFieldsEntry{entry("kubectl-annotate", metav1.ManagedFieldsOperationUpdate, owned)}, false},
+		{"other fields", []metav1.ManagedFieldsEntry{entry(FieldManager, metav1.ManagedFieldsOperationApply, `{"f:metadata":{"f:labels":{}}}`)}, false},
+		{"none", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &metav1.ObjectMeta{ManagedFields: tc.entries}
+			if got := ownsAnnotation(obj, FieldManager, AnnotationResetRequestedAt); got != tc.want {
+				t.Errorf("ownsAnnotation = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
