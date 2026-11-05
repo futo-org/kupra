@@ -171,9 +171,7 @@ template:
 		if err := k8s.Get(ctx, client.ObjectKey{Namespace: sourceNS, Name: "config"}, &cm); !apierrors.IsNotFound(err) {
 			t.Errorf("ConfigMap config: %v; want it removed while the preview is captured", err)
 		}
-		if p := getPreview(t, "snapshots", "source"); p.Status.Phase != kuprav1alpha1.PreviewStopped {
-			t.Errorf("source preview phase = %s, want Stopped", p.Status.Phase)
-		}
+		waitForPhase(t, "snapshots", "source", kuprav1alpha1.PreviewStopped, controller.ReasonCapturing)
 
 		takeSnapshot(t, captured, "handle-1")
 		moved := waitForVolumeSnapshot(t, "snapshots", controller.LabelSnapshotUID, string(snap.UID))
@@ -221,9 +219,7 @@ template:
 			t.Fatal(err)
 		}
 		// The capture that has started still finishes, with the app stopped until it does.
-		if p := getPreview(t, "snapshots", "source"); p.Status.Phase != kuprav1alpha1.PreviewStopped {
-			t.Errorf("source preview phase = %s, want Stopped", p.Status.Phase)
-		}
+		waitForPhase(t, "snapshots", "source", kuprav1alpha1.PreviewStopped, controller.ReasonCapturing)
 		takeSnapshot(t, captured, "handle-doomed")
 		moved := waitForVolumeSnapshot(t, "snapshots", controller.LabelSnapshotUID, string(doomed.UID))
 		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
