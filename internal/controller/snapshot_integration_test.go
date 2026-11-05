@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
-	"github.com/fluxcd/pkg/ssa"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -262,16 +261,25 @@ template:
 			return fmt.Errorf("kupra hasn't claimed the reset request")
 		})
 		// Flux, which owns the Preview, takes over kubectl's fields and applies the Preview without the annotation.
-		flux := ssa.NewResourceManager(k8s, nil, ssa.Owner{Field: "flux", Group: "test.flux"})
+		// This is what fluxcd/pkg/ssa does with kubectl's managed fields before it applies.
+		eventually(t, func() error {
+			p := getPreview(t, "snapshots", "source")
+			fields := p.GetManagedFields()
+			for i, e := range fields {
+				if strings.HasPrefix(e.Manager, "kubectl") && e.Operation == metav1.ManagedFieldsOperationUpdate {
+					fields[i].Manager, fields[i].Operation = "flux", metav1.ManagedFieldsOperationApply
+				}
+			}
+			p.SetManagedFields(fields)
+			return k8s.Update(ctx, p)
+		})
 		manifest := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": kuprav1alpha1.GroupVersion.String(),
 			"kind":       "Preview",
 			"metadata":   map[string]any{"name": "source", "namespace": "snapshots"},
 			"spec":       map[string]any{"appRef": map[string]any{"name": "app"}},
 		}}
-		opts := ssa.DefaultApplyOptions()
-		opts.Cleanup.FieldManagers = []ssa.FieldManager{{Name: "kubectl", OperationType: metav1.ManagedFieldsOperationUpdate}}
-		if _, err := flux.Apply(ctx, manifest, opts); err != nil {
+		if err := k8s.Apply(ctx, client.ApplyConfigurationFromUnstructured(manifest), client.FieldOwner("flux"), client.ForceOwnership); err != nil {
 			t.Fatal(err)
 		}
 		if p := getPreview(t, "snapshots", "source"); p.Annotations[controller.AnnotationResetRequestedAt] != "during" {
