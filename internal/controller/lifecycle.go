@@ -84,7 +84,7 @@ func (r *PreviewReconciler) runningCapture(ctx context.Context, p *kuprav1alpha1
 }
 
 // startCapture starts the next capture of a running preview, and reports whether it did.
-func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.Preview) (bool, error) {
+func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp) (bool, error) {
 	snapshots, err := r.snapshotsOf(ctx, p)
 	if err != nil {
 		return false, err
@@ -98,14 +98,8 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	now := metav1.Now()
 	s.Status.StartTime = &now
 	s.Status.AppRef = &meta.LocalObjectReference{Name: p.Spec.AppRef.Name}
-	s.Status.Parameters = p.Spec.Parameters
-	var app kuprav1alpha1.PreviewApp
-	switch err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.AppRef.Name}, &app); {
-	case err == nil:
-		s.Status.Parameters = render.WithDefaults(app.Spec.Parameters, p.Spec.Parameters)
-	case !apierrors.IsNotFound(err):
-		return false, err
-	}
+	// The app that rendered the running preview, which a capture holds back changes to.
+	s.Status.Parameters = render.WithDefaults(app.Spec.Parameters, p.Spec.Parameters)
 	s.Status.Phase = kuprav1alpha1.PreviewSnapshotInProgress
 	setCondition(&s.Status.Conditions, s.Generation, meta.ReadyCondition, metav1.ConditionFalse, ReasonCapturing, "")
 	setCondition(&s.Status.Conditions, s.Generation, meta.ReconcilingCondition, metav1.ConditionTrue, ReasonCapturing, fmt.Sprintf("capturing Preview %s", p.Name))
