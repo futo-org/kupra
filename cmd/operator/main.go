@@ -32,7 +32,7 @@ func main() {
 
 	namespace := os.Getenv("RUNTIME_NAMESPACE")
 	if namespace == "" {
-		log.Error(nil, "RUNTIME_NAMESPACE must be set to the namespace kupra runs in")
+		log.Error(nil, "RUNTIME_NAMESPACE must be set")
 		os.Exit(1)
 	}
 	ctx := ctrl.SetupSignalHandler()
