@@ -115,6 +115,7 @@ func Compile(spec *kuprav1alpha1.PreviewAppSpec) (*App, field.ErrorList) {
 
 	for _, v := range spec.Variables {
 		vPath := specPath.Child("variables").Key(string(v.Name))
+		errs = append(errs, checkName(v.Name, vPath.Child("name"))...)
 		prg, err := e.compile(v.Expression, nil)
 		outputType := cel.DynType
 		if err != nil {
@@ -197,12 +198,17 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 	if annotations, ok := metadata["annotations"].(map[string]any); ok {
 		for _, key := range settingAnnotations {
 			keyPath := metaPath.Child("annotations").Key(key)
-			if expression, ok := annotations[key].(string); ok {
+			switch expression := annotations[key].(type) {
+			case nil:
+			case string:
 				prg, err := e.compile(expression, cel.BoolType)
 				if err != nil {
 					errs = append(errs, field.Invalid(keyPath, expression, err.Error()))
 				}
 				r.settings[key] = prg
+			default:
+				// An unquoted false in YAML is a bool, not the expression "false".
+				errs = append(errs, field.TypeInvalid(keyPath, expression, "must be a CEL expression"))
 			}
 			if _, ok := annotations[key+exprSuffix]; ok {
 				errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(key+exprSuffix), "may not be set"))
