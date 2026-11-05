@@ -92,3 +92,37 @@ func TestOwnerSubjects(t *testing.T) {
 		t.Errorf("ownerSubjects = %+v, want %+v", got, want)
 	}
 }
+
+func TestNextCapture(t *testing.T) {
+	now := metav1.Now()
+	snapshot := func(name string, finalizer, deleting bool) kuprav1alpha1.PreviewSnapshot {
+		s := kuprav1alpha1.PreviewSnapshot{ObjectMeta: metav1.ObjectMeta{Name: name}}
+		if finalizer {
+			s.Finalizers = []string{Finalizer}
+		}
+		if deleting {
+			s.DeletionTimestamp = &now
+		}
+		return s
+	}
+	for _, tc := range []struct {
+		name      string
+		snapshots []kuprav1alpha1.PreviewSnapshot
+		want      string
+	}{
+		{"none", nil, ""},
+		{"ready", []kuprav1alpha1.PreviewSnapshot{snapshot("a", true, false), snapshot("b", true, false)}, "a"},
+		{"oldest has no finalizer yet", []kuprav1alpha1.PreviewSnapshot{snapshot("a", false, false), snapshot("b", true, false)}, ""},
+		{"oldest is being deleted", []kuprav1alpha1.PreviewSnapshot{snapshot("a", true, true), snapshot("b", true, false)}, "b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ""
+			if s := nextCapture(tc.snapshots); s != nil {
+				got = s.Name
+			}
+			if got != tc.want {
+				t.Errorf("next capture = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

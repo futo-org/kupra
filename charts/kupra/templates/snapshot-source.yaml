@@ -1,0 +1,28 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kupra-snapshot-source
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [kupra.futo.tech]
+        apiVersions: ["*"]
+        operations: [CREATE]
+        resources: [previewsnapshots]
+  failurePolicy: Fail
+  validations:
+    - expression: >-
+        authorizer.group('kupra.futo.tech').resource('previews')
+        .namespace(object.metadata.namespace).name(object.spec.source.previewRef.name)
+        .check('snapshot').allowed()
+      messageExpression: >-
+        'may not snapshot Preview ' + object.spec.source.previewRef.name
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kupra-snapshot-source
+spec:
+  policyName: kupra-snapshot-source
+  validationActions: [Deny]

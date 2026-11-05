@@ -438,6 +438,72 @@ func TestRenderEdgeCases(t *testing.T) {
 		return app.Render(preview, values(t, vals))
 	}
 
+	t.Run("state annotation", func(t *testing.T) {
+		result, err := render(t, `
+parameters:
+  - name: keep
+    title: Keep
+    type: boolean
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: default
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: cache
+        annotations:
+          kupra.futo.tech/state: parameters.keep
+`, `{keep: "false"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Objects[0].NotState || !result.Objects[1].NotState {
+			t.Errorf("NotState = %v, %v; want false, true", result.Objects[0].NotState, result.Objects[1].NotState)
+		}
+		if got := result.Objects[1].GetAnnotations()[StateAnnotation]; got != "parameters.keep" {
+			t.Errorf("state annotation = %q, want the expression kept", got)
+		}
+	})
+
+	t.Run("state of an excluded resource", func(t *testing.T) {
+		// The include expression guards the state expression's map access.
+		result, err := render(t, `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+        annotations:
+          kupra.futo.tech/include: '"keep" in preview.labels'
+          kupra.futo.tech/state: preview.labels["keep"] == "true"
+`, `{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Objects) != 0 {
+			t.Errorf("objects = %v, want the claim excluded", result.Objects)
+		}
+	})
+
+	t.Run("state annotation from an expression", func(t *testing.T) {
+		_, err := render(t, `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: cache
+        annotationsExpr: '{"kupra.futo.tech/state": "false"}'
+`, `{}`)
+		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/state can't be given by an expression") {
+			t.Errorf("error = %v, want the state annotation refused", err)
+		}
+	})
+
 	t.Run("required parameter with a default", func(t *testing.T) {
 		result, err := render(t, `
 parameters:
