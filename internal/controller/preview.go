@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -861,6 +862,12 @@ func listMetadataDrifted(obj, live *unstructured.Unstructured) bool {
 			if !liveKeys[field][key] {
 				return true
 			}
+		}
+	}
+	// Owner references are keyed by UID, but their other fields can change too.
+	for _, ref := range obj.GetOwnerReferences() {
+		if !slices.ContainsFunc(live.GetOwnerReferences(), func(l metav1.OwnerReference) bool { return equality.Semantic.DeepEqual(l, ref) }) {
+			return true
 		}
 	}
 	for field, owned := range appliedListMetadataKeys(live) {

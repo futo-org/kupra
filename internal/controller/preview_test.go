@@ -229,6 +229,10 @@ func TestListMetadataDrifted(t *testing.T) {
 		return u
 	}
 	appliedA := `{"f:metadata":{"f:finalizers":{".":{},"v:\"example.com/a\"":{}}}}`
+	withOwner := func(u *unstructured.Unstructured, controller bool) *unstructured.Unstructured {
+		u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "owner", UID: "owner-uid", Controller: &controller}})
+		return u
+	}
 	for _, tc := range []struct {
 		name      string
 		obj, live *unstructured.Unstructured
@@ -238,6 +242,8 @@ func TestListMetadataDrifted(t *testing.T) {
 		{"added", object([]string{"example.com/a"}, ""), object(nil, ""), true},
 		{"removed from the template", object(nil, ""), object([]string{"example.com/a"}, appliedA), true},
 		{"another controller's", object(nil, ""), object([]string{"kubernetes.io/pvc-protection"}, ""), false},
+		{"owner reference changed", withOwner(object(nil, ""), true), withOwner(object(nil, ""), false), true},
+		{"owner reference unchanged", withOwner(object(nil, ""), true), withOwner(object(nil, ""), true), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := listMetadataDrifted(tc.obj, tc.live); got != tc.want {
