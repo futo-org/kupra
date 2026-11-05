@@ -645,9 +645,10 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	markReconciling(p, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
 	conditions.Delete(p, meta.StalledCondition)
 
+	// Read live: the cache may not have seen a namespace created just before the preview was deleted.
 	var ns corev1.Namespace
 	gone := false
-	switch err := r.Get(ctx, client.ObjectKey{Name: nsName}, &ns); {
+	switch err := r.APIReader.Get(ctx, client.ObjectKey{Name: nsName}, &ns); {
 	case apierrors.IsNotFound(err):
 		gone = true
 	case err != nil:
