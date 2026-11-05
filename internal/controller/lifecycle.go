@@ -429,7 +429,7 @@ func stateEntries(inventory []kuprav1alpha1.InventoryEntry) []kuprav1alpha1.Inve
 func stopping(p *kuprav1alpha1.Preview, reason, message string) {
 	p.Status.Phase = kuprav1alpha1.PreviewStopping
 	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
-	conditions.MarkTrue(p, meta.ReconcilingCondition, reason, "%s", message)
+	markReconciling(p, reason, message)
 	conditions.Delete(p, meta.StalledCondition)
 }
 

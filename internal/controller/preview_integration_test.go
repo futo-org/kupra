@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/controller"
 	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/policy"
 )
@@ -434,5 +435,79 @@ template:
 			}
 			return nil
 		})
+	})
+}
+
+// When an apply fails after earlier ones in the same batch succeeded, those are still in the inventory, so they can be pruned later.
+func TestPartialApply(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	// Refuses the real apply of one ConfigMap, after its dry run passes.
+	applyYAML(t, []byte(`
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-refuse-after-dry-run
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [configmaps]
+  validations:
+    - expression: request.dryRun || object.metadata.name != 'refused'
+      message: refused
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: test-refuse-after-dry-run
+spec:
+  policyName: test-refuse-after-dry-run
+  validationActions: [Deny]
+`))
+	createNamespace(t, "partial", nil)
+	// The policy may take a moment to come into effect.
+	eventually(t, func() error {
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "refused", Namespace: "partial"}}
+		err := k8s.Create(ctx, cm)
+		if err == nil {
+			_ = k8s.Delete(ctx, cm)
+			return fmt.Errorf("the policy doesn't refuse ConfigMap refused yet")
+		}
+		if !apierrors.IsInvalid(err) && !apierrors.IsForbidden(err) {
+			return err
+		}
+		return nil
+	})
+	createApp(t, "partial", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: accepted
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: refused
+`)
+	if err := k8s.Create(ctx, &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial", Namespace: "partial"},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "app"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		p := getPreview(t, "partial", "partial")
+		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
+		if c == nil || c.Reason != controller.ReasonApplyFailed || !strings.Contains(c.Message, "refused") {
+			return fmt.Errorf("Ready = %+v, want the refused apply", c)
+		}
+		if !slices.ContainsFunc(p.Status.Inventory, func(e kuprav1alpha1.InventoryEntry) bool { return e.Name == "accepted" }) {
+			return fmt.Errorf("inventory = %+v, want ConfigMap accepted", p.Status.Inventory)
+		}
+		return nil
 	})
 }

@@ -58,6 +58,8 @@ func TestStallAfterTimeout(t *testing.T) {
 				LastTransitionTime: metav1.NewTime(time.Now().Add(-tc.since)),
 			}}}}
 			app := &kuprav1alpha1.PreviewApp{Spec: kuprav1alpha1.PreviewAppSpec{Timeout: tc.timeout}}
+			// A new message doesn't restart the timeout.
+			starting(p, meta.ProgressingReason, "waiting for Deployment web")
 			stallAfterTimeout(p, app, "waiting for Deployment web")
 
 			c := apimeta.FindStatusCondition(p.Status.Conditions, meta.StalledCondition)
