@@ -93,7 +93,8 @@ func TestPreviewLifecycle(t *testing.T) {
 	if err := k8s.Create(ctx, preview); err != nil {
 		t.Fatal(err)
 	}
-	if preview.Annotations["kupra.futo.tech/created-by"] == "" {
+	creator := preview.Annotations["kupra.futo.tech/created-by"]
+	if creator == "" {
 		t.Errorf("Preview has no created-by annotation: %v", preview.Annotations)
 	}
 
@@ -128,9 +129,17 @@ func TestPreviewLifecycle(t *testing.T) {
 		t.Errorf("default network policy: %v", err)
 	}
 
+	// Updates keep the creator, even ones that try to change it.
 	preview.Spec.Parameters = map[string]string{"replicas": "2"}
+	if preview.Annotations == nil {
+		preview.Annotations = map[string]string{}
+	}
+	preview.Annotations["kupra.futo.tech/created-by"] = "someone-else"
 	if err := k8s.Update(ctx, preview); err != nil {
 		t.Fatal(err)
+	}
+	if got := preview.Annotations["kupra.futo.tech/created-by"]; got != creator {
+		t.Errorf("created-by after an update = %q, want %q", got, creator)
 	}
 	running(2)
 

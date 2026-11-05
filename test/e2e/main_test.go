@@ -97,8 +97,10 @@ func run(m *testing.M) int {
 		return 1
 	}
 	go func() {
+		// Without the operator, every test would wait out its timeouts.
 		if err := mgr.Start(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "running manager: %v\n", err)
+			os.Exit(1)
 		}
 	}()
 
