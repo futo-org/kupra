@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/conditions"
+	"github.com/fluxcd/pkg/runtime/patch"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -64,16 +64,17 @@ func (r *PreviewAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	patch := client.MergeFrom(app.DeepCopy())
+	patcher := patch.NewSerialPatcher(&app, r.Client)
 	app.Status.ObservedGeneration = app.Generation
 	if reason == meta.SucceededReason {
-		setCondition(&app.Status.Conditions, app.Generation, meta.ReadyCondition, metav1.ConditionTrue, reason, "")
-		apimeta.RemoveStatusCondition(&app.Status.Conditions, meta.StalledCondition)
+		conditions.MarkTrue(&app, meta.ReadyCondition, reason, "")
+		conditions.Delete(&app, meta.StalledCondition)
 	} else {
-		setCondition(&app.Status.Conditions, app.Generation, meta.ReadyCondition, metav1.ConditionFalse, reason, message)
-		setCondition(&app.Status.Conditions, app.Generation, meta.StalledCondition, metav1.ConditionTrue, reason, message)
+		conditions.MarkFalse(&app, meta.ReadyCondition, reason, "%s", message)
+		conditions.MarkTrue(&app, meta.StalledCondition, reason, "%s", message)
 	}
-	if err := r.Status().Patch(ctx, &app, patch); err != nil {
+	owned := patch.WithOwnedConditions{Conditions: []string{meta.ReadyCondition, meta.StalledCondition}}
+	if err := patcher.Patch(ctx, &app, owned, patch.WithFieldOwner(FieldManager)); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -145,14 +146,4 @@ func (r *PreviewAppReconciler) apps(ctx context.Context, opts ...client.ListOpti
 		requests[i] = reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&app)}
 	}
 	return requests
-}
-
-func setCondition(conditions *[]metav1.Condition, generation int64, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	apimeta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: generation,
-		Reason:             reason,
-		Message:            message,
-	})
 }
