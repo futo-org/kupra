@@ -161,6 +161,7 @@ func (r *PreviewReconciler) reconcileCapture(ctx context.Context, p *kuprav1alph
 		req := state.CaptureRequest{
 			Resource:  live,
 			Namespace: s.Namespace,
+			Online:    s.Spec.Mode == kuprav1alpha1.SnapshotOnline,
 			Names:     names.ForResource(s.Name, s.UID, gk, entry.Name),
 			Labels:    map[string]string{LabelSnapshotUID: string(s.UID)},
 		}

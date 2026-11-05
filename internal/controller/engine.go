@@ -25,6 +25,7 @@ const (
 
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;create;patch;delete
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;list;create;patch;delete
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=backups,verbs=get;create;patch;delete
 
 // runKind calls a kind with the objects it asked to read, applying and deleting what it asks for, until it's done, fails, or asks for nothing new. This is how Crossplane calls composition functions that require extra resources. Objects in ownedNamespace get owner as their owner.
 func (r *PreviewReconciler) runKind(ctx context.Context, call func(state.Observed) state.Response, ownedNamespace string, owner *metav1.OwnerReference) (state.Response, error) {

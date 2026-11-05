@@ -82,6 +82,15 @@ rules:
   - list
   - patch
 - apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterroles

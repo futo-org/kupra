@@ -6,6 +6,7 @@ package state
 import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
@@ -87,9 +88,11 @@ type CaptureRequest struct {
 	Resource *unstructured.Unstructured
 	// Namespace is the PreviewSnapshot's namespace, where the capture is moved to.
 	Namespace string
-	Names     names.Resource
-	Labels    map[string]string
-	Observed  Observed
+	// Online is set when the app keeps running during the capture.
+	Online   bool
+	Names    names.Resource
+	Labels   map[string]string
+	Observed Observed
 }
 
 // Capture lists the objects in the PreviewSnapshot's namespace that hold a capture's data.
@@ -98,11 +101,49 @@ type Capture struct {
 }
 
 var kinds = map[schema.GroupKind]Kind{
-	{Kind: "PersistentVolumeClaim"}: persistentVolumeClaim{},
+	{Kind: "PersistentVolumeClaim"}:           persistentVolumeClaim{},
+	{Group: backupGVK.Group, Kind: "Cluster"}: cnpgCluster{},
 }
 
 // For returns the support for a kind, if there is any.
 func For(gk schema.GroupKind) (Kind, bool) {
 	k, ok := kinds[gk]
 	return k, ok
+}
+
+func toUnstructured(obj runtime.Object, gvk schema.GroupVersionKind) *unstructured.Unstructured {
+	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		panic(err)
+	}
+	u := &unstructured.Unstructured{Object: content}
+	u.SetGroupVersionKind(gvk)
+	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
+	unstructured.RemoveNestedField(u.Object, "status")
+	dropNulls(u.Object)
+	return u
+}
+
+// dropNulls removes the nulls left by fields without omitempty, which CRD schemas reject.
+func dropNulls(m map[string]any) {
+	for k, v := range m {
+		switch v := v.(type) {
+		case nil:
+			delete(m, k)
+		case map[string]any:
+			dropNulls(v)
+		}
+	}
+}
+
+func stringMap(m map[string]string) map[string]any {
+	out := map[string]any{}
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func fromUnstructured(u *unstructured.Unstructured, obj any) error {
+	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, obj)
 }
