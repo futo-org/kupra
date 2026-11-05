@@ -333,6 +333,15 @@ template:
 			if err := k8s.Get(ctx, client.ObjectKey{Name: "content-handle-1"}, &snapshotv1.VolumeSnapshotContent{}); !apierrors.IsNotFound(err) {
 				return fmt.Errorf("the source's retained content still exists (%v)", err)
 			}
+			// The restore copies of restored, which hold this snapshot's data, go with it.
+			restoredPreview := getPreview(t, "snapshots", "restored")
+			var copies snapshotv1.VolumeSnapshotList
+			if err := k8s.List(ctx, &copies, client.InNamespace(restoredPreview.Status.Namespace), client.MatchingLabels{controller.LabelPreviewUID: string(restoredPreview.UID)}); err != nil {
+				return err
+			}
+			if len(copies.Items) > 0 {
+				return fmt.Errorf("%d restore copies of the deleted snapshot are left", len(copies.Items))
+			}
 			return nil
 		})
 	})
