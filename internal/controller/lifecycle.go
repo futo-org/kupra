@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -211,17 +212,46 @@ func (r *PreviewReconciler) finishSnapshot(ctx context.Context, s *kuprav1alpha1
 	return client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
 
-// recordResetRequest records a new value of the reset annotation in the preview's status, so the request survives the annotation being removed, such as by a GitOps tool that owns the Preview.
-func recordResetRequest(p *kuprav1alpha1.Preview) {
+// resetRequested reports whether a preview's reset annotation has an unhandled value.
+func resetRequested(p *kuprav1alpha1.Preview) bool {
 	requested := p.Annotations[AnnotationResetRequestedAt]
-	if requested != "" && requested != p.Status.LastHandledResetAt {
-		p.Status.PendingResetAt = requested
-	}
+	return requested != "" && requested != p.Status.LastHandledResetAt
 }
 
-// resetRequested reports whether a preview has a reset that hasn't been handled.
-func resetRequested(p *kuprav1alpha1.Preview) bool {
-	return p.Status.PendingResetAt != ""
+// claimResetRequest takes ownership of an unhandled reset request with server-side apply, so the annotation stays while the reset waits, even if the field manager that set it is taken over and drops it, as Flux does with kubectl's. It reports whether it changed the Preview.
+func (r *PreviewReconciler) claimResetRequest(ctx context.Context, p *kuprav1alpha1.Preview) (bool, error) {
+	if !resetRequested(p) || ownsAnnotation(p, FieldManager, AnnotationResetRequestedAt) {
+		return false, nil
+	}
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(kuprav1alpha1.GroupVersion.WithKind("Preview"))
+	u.SetNamespace(p.Namespace)
+	u.SetName(p.Name)
+	u.SetAnnotations(map[string]string{AnnotationResetRequestedAt: p.Annotations[AnnotationResetRequestedAt]})
+	if err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(FieldManager)); err != nil {
+		// Another applier owns a different value.
+		if apierrors.IsConflict(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// ownsAnnotation reports whether a field manager owns an annotation through server-side apply.
+func ownsAnnotation(obj metav1.Object, manager, key string) bool {
+	for _, e := range obj.GetManagedFields() {
+		if e.Manager != manager || e.Operation != metav1.ManagedFieldsOperationApply || e.Subresource != "" || e.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]map[string]map[string]any
+		if json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields) == nil {
+			if _, ok := fields["f:metadata"]["f:annotations"]["f:"+key]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // reconcileReset removes a preview's app, state and restore copies, then records the reset as handled.
@@ -253,8 +283,7 @@ func (r *PreviewReconciler) finishReset(ctx context.Context, p *kuprav1alpha1.Pr
 	if err := r.releaseSnapshots(ctx, p); err != nil {
 		return false, err
 	}
-	p.Status.LastHandledResetAt = p.Status.PendingResetAt
-	p.Status.PendingResetAt = ""
+	p.Status.LastHandledResetAt = p.Annotations[AnnotationResetRequestedAt]
 	p.Status.Inventory = nil
 	p.Status.RestoredFrom = nil
 	apimeta.RemoveStatusCondition(&p.Status.Conditions, ConditionRestored)

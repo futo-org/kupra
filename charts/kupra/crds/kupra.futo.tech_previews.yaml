@@ -311,11 +311,6 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
-              pendingResetAt:
-                description: PendingResetAt is a kupra.futo.tech/reset-requested-at
-                  value that hasn't been handled yet. It's kept if the annotation
-                  is removed.
-                type: string
               phase:
                 description: Phase summarises the state for display. Tools should
                   use conditions instead.

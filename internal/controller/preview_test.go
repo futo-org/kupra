@@ -127,23 +127,26 @@ func TestNextCapture(t *testing.T) {
 	}
 }
 
-func TestRecordResetRequest(t *testing.T) {
-	p := &kuprav1alpha1.Preview{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{AnnotationResetRequestedAt: "1"}}}
-	recordResetRequest(p)
-	if !resetRequested(p) || p.Status.PendingResetAt != "1" {
-		t.Fatalf("pending = %q, want 1", p.Status.PendingResetAt)
+func TestOwnsAnnotation(t *testing.T) {
+	entry := func(manager string, op metav1.ManagedFieldsOperationType, fields string) metav1.ManagedFieldsEntry {
+		return metav1.ManagedFieldsEntry{Manager: manager, Operation: op, FieldsV1: metav1.NewFieldsV1(fields)}
 	}
-	// The request survives its annotation being removed.
-	p.Annotations = nil
-	recordResetRequest(p)
-	if !resetRequested(p) {
-		t.Error("reset no longer requested once the annotation is gone")
-	}
-	// A handled value isn't requested again.
-	p.Status.LastHandledResetAt, p.Status.PendingResetAt = "1", ""
-	p.Annotations = map[string]string{AnnotationResetRequestedAt: "1"}
-	recordResetRequest(p)
-	if resetRequested(p) {
-		t.Error("a handled reset is requested again")
+	owned := `{"f:metadata":{"f:annotations":{"f:kupra.futo.tech/reset-requested-at":{}}}}`
+	for _, tc := range []struct {
+		name    string
+		entries []metav1.ManagedFieldsEntry
+		want    bool
+	}{
+		{"applied by kupra", []metav1.ManagedFieldsEntry{entry(FieldManager, metav1.ManagedFieldsOperationApply, owned)}, true},
+		{"set by kubectl", []metav1.ManagedFieldsEntry{entry("kubectl-annotate", metav1.ManagedFieldsOperationUpdate, owned)}, false},
+		{"other fields", []metav1.ManagedFieldsEntry{entry(FieldManager, metav1.ManagedFieldsOperationApply, `{"f:metadata":{"f:labels":{}}}`)}, false},
+		{"none", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &metav1.ObjectMeta{ManagedFields: tc.entries}
+			if got := ownsAnnotation(obj, FieldManager, AnnotationResetRequestedAt); got != tc.want {
+				t.Errorf("ownsAnnotation = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
