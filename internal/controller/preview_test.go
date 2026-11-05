@@ -21,9 +21,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
@@ -200,6 +197,9 @@ func TestReconcileFromStaleRead(t *testing.T) {
 				t.Errorf("inventory = %v, want it kept", got.Status.Inventory)
 			}
 		})
+	}
+}
+
 // A capture records the parameter defaults of the PreviewApp that rendered the preview, even if the stored one has changed since.
 func TestStartCaptureRecordsRenderedDefaults(t *testing.T) {
 	ctx := context.Background()
