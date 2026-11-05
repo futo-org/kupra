@@ -99,15 +99,17 @@ func TestNamespaceReplacedSinceRead(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		run  func(*controller.PreviewReconciler, *kuprav1alpha1.Preview, string) error
+		// conflict is set when the write's precondition catches the stale read. Deletion reads the namespace live, so it sees the replacement straight away.
+		conflict bool
 	}{
 		{"ensure", func(r *controller.PreviewReconciler, p *kuprav1alpha1.Preview, name string) error {
 			_, _, err := r.EnsureNamespace(ctx, p, name, kuprav1alpha1.PreviewPolicySpec{})
 			return err
-		}},
+		}, true},
 		{"delete", func(r *controller.PreviewReconciler, p *kuprav1alpha1.Preview, _ string) error {
 			_, err := r.ReconcileDelete(ctx, p)
 			return err
-		}},
+		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := stalePreview("replaced-"+tc.name, "mine")
@@ -117,8 +119,12 @@ func TestNamespaceReplacedSinceRead(t *testing.T) {
 			replaceNamespace(t, name, "other")
 
 			r := staleReconciler(t, name, stale)
-			if err := tc.run(r, p, name); !apierrors.IsConflict(err) {
+			err := tc.run(r, p, name)
+			if tc.conflict && !apierrors.IsConflict(err) {
 				t.Errorf("error = %v, want a conflict from the stale read", err)
+			}
+			if !tc.conflict && err != nil {
+				t.Errorf("error = %v, want the replacement left alone", err)
 			}
 			var ns corev1.Namespace
 			if err := k8s.Get(ctx, client.ObjectKey{Name: name}, &ns); err != nil {
