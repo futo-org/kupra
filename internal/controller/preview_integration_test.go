@@ -131,6 +131,14 @@ template:
 	if len(p.Status.Inventory) != 4 {
 		t.Errorf("inventory = %v, want the ConfigMap, both claims and the Service", p.Status.Inventory)
 	}
+	// Pruning only deletes objects with the preview's owner labels.
+	var config corev1.ConfigMap
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "config"}, &config); err != nil {
+		t.Fatal(err)
+	}
+	if l := config.Labels; l["preview.kupra.futo.tech/name"] != "pr-1" || l["preview.kupra.futo.tech/namespace"] != "previews" {
+		t.Errorf("ConfigMap config labels = %v, want the preview's owner labels", l)
+	}
 
 	var ns corev1.Namespace
 	if err := k8s.Get(ctx, client.ObjectKey{Name: nsName}, &ns); err != nil {

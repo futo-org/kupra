@@ -12,6 +12,7 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/conditions"
 	"github.com/fluxcd/pkg/runtime/patch"
+	"github.com/fluxcd/pkg/ssa"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -266,7 +267,8 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 
 	restored := plan.resources
-	applied, err := applyAll(ctx, applier, restored, true)
+	resources := ssa.NewResourceManager(applier, nil, templateOwner)
+	applied, err := applyAll(ctx, resources, p, restored, true)
 	var restoreSettling bool
 	if err == nil {
 		restoreSettling, err = r.recordRestore(ctx, p, applier, plan)
@@ -290,12 +292,12 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	if err == nil {
 		var appliedWorkload []kuprav1alpha1.InventoryEntry
-		appliedWorkload, err = applyAll(ctx, applier, workload, false)
+		appliedWorkload, err = applyAll(ctx, resources, p, workload, false)
 		applied = append(applied, appliedWorkload...)
 	}
 	var retained []kuprav1alpha1.InventoryEntry
 	if err == nil {
-		retained, err = r.prune(ctx, applier, nsName, p.Status.Inventory, applied)
+		retained, err = r.prune(ctx, resources, p, nsName, p.Status.Inventory, applied)
 	}
 	if err != nil {
 		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
@@ -479,6 +481,7 @@ func (r *PreviewReconciler) ensureApplyAccount(ctx context.Context, p *kuprav1al
 	return "", "", r.applyObject(ctx, r.Client, binding)
 }
 
+// impersonate returns a client that acts as one of kupra's service accounts. Flux's Impersonator builds clients from the process's kubeconfig and runs discovery for every one, so kupra builds its own from the manager's config and mapper.
 func (r *PreviewReconciler) impersonate(account string) (client.Client, error) {
 	cfg := rest.CopyConfig(r.Config)
 	cfg.Impersonate = rest.ImpersonationConfig{UserName: serviceaccount.MakeUsername(r.Namespace, account)}
@@ -505,22 +508,40 @@ func (r *PreviewReconciler) applyObject(ctx context.Context, c client.Client, ob
 	return nil
 }
 
-func applyAll(ctx context.Context, c client.Client, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
-	var applied []kuprav1alpha1.InventoryEntry
-	var errs []error
-	for _, obj := range objs {
-		if err := c.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj.DeepCopy()), client.FieldOwner(FieldManager), client.ForceOwnership); err != nil {
-			errs = append(errs, fmt.Errorf("applying %s %s: %w", obj.GetKind(), obj.GetName(), err))
-			continue
-		}
-		applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: refOf(obj), State: isState})
+// templateOwner is how kupra applies template resources, and the prefix of the labels that mark them as a preview's.
+var templateOwner = ssa.Owner{Field: FieldManager, Group: "preview.kupra.futo.tech"}
+
+// applyAll applies a preview's resources and returns their inventory entries, including those applied before an error.
+func applyAll(ctx context.Context, m *ssa.ResourceManager, p *kuprav1alpha1.Preview, objs []*unstructured.Unstructured, isState bool) ([]kuprav1alpha1.InventoryEntry, error) {
+	if len(objs) == 0 {
+		return nil, nil
 	}
-	return applied, errors.Join(errs...)
+	copies := make([]*unstructured.Unstructured, len(objs))
+	for i, obj := range objs {
+		copies[i] = obj.DeepCopy()
+	}
+	m.SetOwnerLabels(copies, p.Name, p.Namespace)
+	changes, err := m.ApplyAll(ctx, copies, ssa.DefaultApplyOptions())
+	var applied []kuprav1alpha1.InventoryEntry
+	if changes != nil {
+		for _, c := range changes.Entries {
+			if c.Action == ssa.UnknownAction || c.Action == ssa.SkippedAction {
+				continue
+			}
+			ref := corev1.TypedLocalObjectReference{Kind: c.ObjMetadata.GroupKind.Kind, Name: c.ObjMetadata.Name}
+			if group := c.ObjMetadata.GroupKind.Group; group != "" {
+				ref.APIGroup = &group
+			}
+			applied = append(applied, kuprav1alpha1.InventoryEntry{TypedLocalObjectReference: ref, State: isState})
+		}
+	}
+	return applied, err
 }
 
-// prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted.
-func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
+// prune deletes resources that are no longer rendered, apart from state, which it returns: that goes when the preview is reset or deleted. Only objects with the preview's owner labels are deleted.
+func (r *PreviewReconciler) prune(ctx context.Context, m *ssa.ResourceManager, p *kuprav1alpha1.Preview, namespace string, previous, current []kuprav1alpha1.InventoryEntry) ([]kuprav1alpha1.InventoryEntry, error) {
 	var retained []kuprav1alpha1.InventoryEntry
+	var stale []*unstructured.Unstructured
 	var errs []error
 	for _, entry := range previous {
 		ref := entry.TypedLocalObjectReference
@@ -544,8 +565,13 @@ func (r *PreviewReconciler) prune(ctx context.Context, c client.Client, namespac
 		u.SetGroupVersionKind(mapping.GroupVersionKind)
 		u.SetNamespace(namespace)
 		u.SetName(ref.Name)
-		if err := c.Delete(ctx, u, client.PropagationPolicy(metav1.DeletePropagationBackground)); client.IgnoreNotFound(err) != nil {
-			errs = append(errs, fmt.Errorf("deleting %s %s: %w", ref.Kind, ref.Name, err))
+		stale = append(stale, u)
+	}
+	if len(stale) > 0 {
+		opts := ssa.DefaultDeleteOptions()
+		opts.Inclusions = m.GetOwnerLabels(p.Name, p.Namespace)
+		if _, err := m.DeleteAll(ctx, stale, opts); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return retained, errors.Join(errs...)
@@ -679,14 +705,6 @@ func running(p *kuprav1alpha1.Preview) {
 	conditions.MarkTrue(p, meta.ReadyCondition, meta.SucceededReason, "")
 	conditions.Delete(p, meta.ReconcilingCondition)
 	conditions.Delete(p, meta.StalledCondition)
-}
-
-func refOf(obj *unstructured.Unstructured) corev1.TypedLocalObjectReference {
-	ref := corev1.TypedLocalObjectReference{Kind: obj.GetKind(), Name: obj.GetName()}
-	if group := obj.GroupVersionKind().Group; group != "" {
-		ref.APIGroup = &group
-	}
-	return ref
 }
 
 func refGroup(ref corev1.TypedLocalObjectReference) string {
