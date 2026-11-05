@@ -818,3 +818,30 @@ template:
 	}
 	handled("b")
 }
+
+// A reset request removed after kupra read the Preview isn't put back by kupra's claim on it.
+func TestClaimAfterRemoval(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "claims", nil)
+	p := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "pr", Namespace: "claims", Annotations: map[string]string{controller.AnnotationResetRequestedAt: "x"}},
+		Spec:       kuprav1alpha1.PreviewSpec{AppRef: meta.LocalObjectReference{Name: "missing"}},
+	}
+	if err := k8s.Create(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	stale := p.DeepCopy()
+	eventually(t, func() error {
+		got := getPreview(t, "claims", "pr")
+		delete(got.Annotations, controller.AnnotationResetRequestedAt)
+		return k8s.Update(ctx, got)
+	})
+
+	r := &controller.PreviewReconciler{Client: k8s}
+	if _, err := r.ClaimResetRequest(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	if got := getPreview(t, "claims", "pr"); got.Annotations[controller.AnnotationResetRequestedAt] != "" {
+		t.Errorf("annotations = %v, want the removed reset request to stay removed", got.Annotations)
+	}
+}

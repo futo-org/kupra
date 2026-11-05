@@ -230,14 +230,20 @@ func (r *PreviewReconciler) claimResetRequest(ctx context.Context, p *kuprav1alp
 	u.SetGroupVersionKind(kuprav1alpha1.GroupVersion.WithKind("Preview"))
 	u.SetNamespace(p.Namespace)
 	u.SetName(p.Name)
+	// The apply fails if the Preview changed since it was read, so a request removed meanwhile isn't put back.
+	u.SetResourceVersion(p.ResourceVersion)
 	// lastHandledResetAt has been written by now, so releasing can't lose the request, even if kupra was its only owner and the annotation goes.
 	if !owned {
 		u.SetAnnotations(map[string]string{AnnotationResetRequestedAt: p.Annotations[AnnotationResetRequestedAt]})
 	}
 	if err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(u), client.FieldOwner(FieldManager)); err != nil {
-		// Another applier owns a different value.
-		if apierrors.IsConflict(err) {
+		// Another applier owns a different value, which is theirs to change.
+		if _, ok := apierrors.StatusCause(err, metav1.CauseTypeFieldManagerConflict); ok {
 			return false, nil
+		}
+		// The Preview changed since it was read, so look again from a fresh read.
+		if apierrors.IsConflict(err) {
+			return true, nil
 		}
 		return false, err
 	}

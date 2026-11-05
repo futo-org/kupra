@@ -27,3 +27,7 @@ func (r *PreviewReconciler) HoldSnapshot(ctx context.Context, p *kuprav1alpha1.P
 func (r *PreviewReconciler) FinishReset(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
 	return r.finishReset(ctx, p, namespace)
 }
+
+func (r *PreviewReconciler) ClaimResetRequest(ctx context.Context, p *kuprav1alpha1.Preview) (bool, error) {
+	return r.claimResetRequest(ctx, p)
+}
