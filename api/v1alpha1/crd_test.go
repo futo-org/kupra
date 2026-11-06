@@ -49,7 +49,7 @@ func undescribed(t *testing.T, path string, schema map[string]any) {
 	properties, _ := schema["properties"].(map[string]any)
 	for name, p := range properties {
 		property, _ := p.(map[string]any)
-		if _, ok := property["description"]; !ok {
+		if description, _ := property["description"].(string); description == "" {
 			t.Errorf("%s.%s has no description", path, name)
 		}
 		undescribed(t, path+"."+name, property)
