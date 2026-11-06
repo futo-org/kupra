@@ -390,9 +390,8 @@ template:
 		if c := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReconcilingCondition); c == nil || !strings.Contains(c.Message, "Preview pinned") {
 			t.Errorf("Reconciling = %+v, want it to name Preview pinned", c)
 		}
-		// kubectl shows Ready's message as the snapshot's status.
 		if c := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReadyCondition); c == nil || c.Status != metav1.ConditionFalse || c.Reason != controller.ReasonInUse || !strings.Contains(c.Message, "Preview pinned") {
-			t.Errorf("Ready = %+v, want it False because Preview pinned holds it", c)
+			t.Errorf("Ready = %+v, want False, InUse, naming Preview pinned", c)
 		}
 		if err := k8s.Delete(ctx, pinned); err != nil {
 			t.Fatal(err)
