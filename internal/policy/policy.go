@@ -80,6 +80,9 @@ func Effective(spec kuprav1alpha1.PreviewPolicySpec, fallback *kuprav1alpha1.Pre
 	if out.NetworkPolicies == nil {
 		out.NetworkPolicies = fb.NetworkPolicies
 	}
+	if out.APIServerAccess == nil {
+		out.APIServerAccess = fb.APIServerAccess
+	}
 	if out.ResourceQuota == nil {
 		out.ResourceQuota = fb.ResourceQuota
 	}

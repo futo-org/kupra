@@ -73,6 +73,8 @@ type PreviewReconciler struct {
 	client.Client
 	// APIReader reads objects kupra doesn't cache, such as a preview namespace's RoleBindings.
 	APIReader client.Reader
+	// Endpoints reads the kubernetes Service's EndpointSlices. Without it, they're read with APIReader.
+	Endpoints client.Reader
 	Config    *rest.Config
 	Mapper    apimeta.RESTMapper
 	// Namespace is kupra's own namespace, where previews' service accounts live.
@@ -419,6 +421,17 @@ func (r *PreviewReconciler) applyPolicy(ctx context.Context, namespace string, s
 			return err
 		}
 		want[np.Metadata.Name] = true
+	}
+	if access := settings.APIServerAccess; access != nil && access.PodSelector != nil {
+		obj, err := r.apiServerPolicy(ctx, namespace, *access.PodSelector)
+		if err != nil {
+			return err
+		}
+		obj.Labels = marker
+		if err := r.applyObject(ctx, r.Client, obj); err != nil {
+			return err
+		}
+		want[obj.Name] = true
 	}
 	var existing networkingv1.NetworkPolicyList
 	if err := r.APIReader.List(ctx, &existing, client.InNamespace(namespace), client.MatchingLabels(marker)); err != nil {
@@ -768,6 +781,10 @@ func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	}); err != nil {
 		return err
 	}
+	apiServer, err := r.watchAPIServer(mgr)
+	if err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kuprav1alpha1.Preview{}, builder.WithPredicates(predicate.Or(
 			predicate.GenerationChangedPredicate{},
@@ -780,6 +797,7 @@ func (r *PreviewReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		Watches(&kuprav1alpha1.PreviewSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.previewsForSnapshot)).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.previewsForNamespace)).
 		Watches(&rbacv1.RoleBinding{}, handler.EnqueueRequestsFromMapFunc(r.previewsForAdminBinding)).
+		WatchesRawSource(apiServer).
 		Complete(r)
 }
 

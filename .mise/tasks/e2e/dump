@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Print the end-to-end test cluster's state, to debug failed tests"
+set -uo pipefail
+
+export KUBECONFIG="$PWD/.e2e/kubeconfig"
+k() { kubectl --context kind-kupra-e2e "$@"; }
+
+k get previewapps,previews,previewsnapshots,clusters.postgresql.cnpg.io,backups.postgresql.cnpg.io,volumesnapshots,pods,pvc -A -o wide
+k get events -A --sort-by=.lastTimestamp
+for ns in $(k get namespaces -o name | grep -E "/e2e-"); do
+  ns="${ns#namespace/}"
+  for pod in $(k -n "$ns" get pods -o name); do
+    echo "=== $ns/$pod"
+    k -n "$ns" logs "$pod" --all-containers --tail=50
+  done
+done

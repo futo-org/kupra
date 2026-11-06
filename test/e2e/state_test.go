@@ -72,6 +72,36 @@ template:
                   claimName: data
 `
 
+// waitForRunning waits for a Preview to be running.
+func waitForRunning(t *testing.T, namespace, name string) *kuprav1alpha1.Preview {
+	t.Helper()
+	var p kuprav1alpha1.Preview
+	eventually(t, 5*time.Minute, func() error {
+		if err := k8s.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
+			return err
+		}
+		if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != kuprav1alpha1.PreviewRunning {
+			return fmt.Errorf("Preview %s is %s, Ready %+v", name, p.Status.Phase, apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition))
+		}
+		return nil
+	})
+	return &p
+}
+
+// waitForSnapshot waits for a PreviewSnapshot to be ready to use.
+func waitForSnapshot(t *testing.T, snap *kuprav1alpha1.PreviewSnapshot) {
+	t.Helper()
+	eventually(t, 5*time.Minute, func() error {
+		if err := k8s.Get(context.Background(), client.ObjectKeyFromObject(snap), snap); err != nil {
+			return err
+		}
+		if !snap.Status.ReadyToUse {
+			return fmt.Errorf("PreviewSnapshot is %s, Ready %+v", snap.Status.Phase, apimeta.FindStatusCondition(snap.Status.Conditions, meta.ReadyCondition))
+		}
+		return nil
+	})
+}
+
 func TestState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -95,17 +125,7 @@ func TestState(t *testing.T) {
 
 	running := func(name string) *kuprav1alpha1.Preview {
 		t.Helper()
-		var p kuprav1alpha1.Preview
-		eventually(t, 5*time.Minute, func() error {
-			if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns.Name, Name: name}, &p); err != nil {
-				return err
-			}
-			if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != kuprav1alpha1.PreviewRunning {
-				return fmt.Errorf("Preview %s is %s, Ready %+v", name, p.Status.Phase, apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition))
-			}
-			return nil
-		})
-		return &p
+		return waitForRunning(t, ns.Name, name)
 	}
 
 	source := &kuprav1alpha1.Preview{
@@ -127,15 +147,7 @@ func TestState(t *testing.T) {
 	if err := k8s.Create(ctx, snap); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, 5*time.Minute, func() error {
-		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
-			return err
-		}
-		if !snap.Status.ReadyToUse {
-			return fmt.Errorf("PreviewSnapshot is %s, Ready %+v", snap.Status.Phase, apimeta.FindStatusCondition(snap.Status.Conditions, meta.ReadyCondition))
-		}
-		return nil
-	})
+	waitForSnapshot(t, snap)
 	// The source comes back after an Offline capture.
 	running("source")
 

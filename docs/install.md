@@ -1,6 +1,6 @@
 # Installing kupra
 
-kupra needs Kubernetes 1.36 or newer. To snapshot state, it needs the CSI snapshot controller, and a default VolumeSnapshotClass for each CSI driver previews use.
+kupra needs Kubernetes 1.36 or newer. To snapshot state, it needs the CSI snapshot controller, and a default VolumeSnapshotClass for each CSI driver previews use. Previews with CloudNativePG clusters need CloudNativePG, which kupra is tested with at version 1.30.
 
 ## Install
 
@@ -31,3 +31,7 @@ defaultPolicy:
       requests.cpu: "8"
       requests.memory: null
 ```
+
+## CloudNativePG
+
+CloudNativePG's pods talk to the Kubernetes API server, which the default `restrict-egress` NetworkPolicy blocks when it's on a private address. NetworkPolicies can only allow the API server by address, so the default PreviewPolicy's `apiServerAccess` has kupra do it: it creates the NetworkPolicy `kupra-api-server` in each preview namespace, which lets pods with a `cnpg.io/cluster` label reach the addresses and ports of the `kubernetes` Service's endpoints, and keeps it up to date.

@@ -1,0 +1,355 @@
+package state
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	cnpgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
+	cnpgutils "github.com/cloudnative-pg/cloudnative-pg/pkg/utils"
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
+)
+
+var (
+	backupGVK = cnpgv1.SchemeGroupVersion.WithKind("Backup")
+
+	// cnpgPrefix starts the labels and annotations CloudNativePG puts on a backup's VolumeSnapshots, which it reads when recovering from them.
+	cnpgPrefix = cnpgutils.MetadataNamespace + "/"
+)
+
+// defaultName is CloudNativePG's default name for a cluster's application database and its owner. CloudNativePG defines it in a package that would bring in its plugin interface.
+const defaultName = "app"
+
+// roles returns the roles of the volumes kupra captures from a cluster: its data, and its WAL if it has a volume for them.
+func roles(c *unstructured.Unstructured) []cnpgutils.PVCRole {
+	if _, ok, _ := unstructured.NestedMap(c.Object, "spec", storageField(cnpgutils.PVCRolePgWal)); ok {
+		return []cnpgutils.PVCRole{cnpgutils.PVCRolePgData, cnpgutils.PVCRolePgWal}
+	}
+	return []cnpgutils.PVCRole{cnpgutils.PVCRolePgData}
+}
+
+// storageField is the field of a cluster's spec that configures the volume with a role.
+func storageField(role cnpgutils.PVCRole) string {
+	if role == cnpgutils.PVCRolePgWal {
+		return "walStorage"
+	}
+	return "storage"
+}
+
+// nameFor names an object kupra creates for the volume with a role, such as the pg-data capture.
+func nameFor(role cnpgutils.PVCRole) string {
+	return strings.ReplaceAll(strings.ToLower(string(role)), "_", "-")
+}
+
+// cnpgCluster supports CloudNativePG clusters, through CloudNativePG's volume snapshot backups and recovery.
+type cnpgCluster struct{}
+
+func (cnpgCluster) Check(resource map[string]any, fldPath *field.Path) field.ErrorList {
+	const forbidden = "may not be set on a cluster with managed state"
+	var errs field.ErrorList
+	if _, ok := resource["specExpr"]; ok {
+		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), forbidden))
+	}
+	spec, _ := resource["spec"].(map[string]any)
+	specPath := fldPath.Child("spec")
+	for _, key := range []string{"backupExpr", "bootstrapExpr", "pluginsExpr", "replica", "replicaExpr", "tablespaces", "tablespacesExpr"} {
+		if _, ok := spec[key]; ok {
+			errs = append(errs, field.Forbidden(specPath.Child(key), forbidden))
+		}
+	}
+
+	// kupra configures volume snapshot backups. A template only chooses their snapshot classes.
+	backup, _ := spec["backup"].(map[string]any)
+	for _, key := range slices.Sorted(maps.Keys(backup)) {
+		if key != "volumeSnapshot" {
+			errs = append(errs, field.Forbidden(specPath.Child("backup", key), forbidden))
+		}
+	}
+	volumeSnapshot, _ := backup["volumeSnapshot"].(map[string]any)
+	for _, key := range slices.Sorted(maps.Keys(volumeSnapshot)) {
+		switch key {
+		case "className", "classNameExpr", "walClassName", "walClassNameExpr":
+		default:
+			errs = append(errs, field.Forbidden(specPath.Child("backup", "volumeSnapshot", key), forbidden))
+		}
+	}
+
+	// A restored cluster keeps its source's database, owner and password, so the template can't choose others.
+	bootstrap, _ := spec["bootstrap"].(map[string]any)
+	for _, key := range slices.Sorted(maps.Keys(bootstrap)) {
+		if key != "initdb" {
+			errs = append(errs, field.Forbidden(specPath.Child("bootstrap", key), forbidden))
+		}
+	}
+	initdb, _ := bootstrap["initdb"].(map[string]any)
+	initdbPath := specPath.Child("bootstrap", "initdb")
+	for _, key := range []string{"database", "owner"} {
+		if v, ok := initdb[key]; ok && v != defaultName {
+			errs = append(errs, field.NotSupported(initdbPath.Child(key), v, []string{defaultName}))
+		}
+	}
+	for _, key := range []string{"databaseExpr", "ownerExpr", "secret", "secretExpr"} {
+		if _, ok := initdb[key]; ok {
+			errs = append(errs, field.Forbidden(initdbPath.Child(key), forbidden))
+		}
+	}
+
+	// WAL archiving would make a restored cluster archive into its source's archive.
+	plugins, _ := spec["plugins"].([]any)
+	for i, p := range plugins {
+		plugin, _ := p.(map[string]any)
+		if _, ok := plugin["isWALArchiverExpr"]; ok {
+			errs = append(errs, field.Forbidden(specPath.Child("plugins").Index(i).Child("isWALArchiverExpr"), forbidden))
+		}
+		if plugin["isWALArchiver"] == true {
+			errs = append(errs, field.Forbidden(specPath.Child("plugins").Index(i).Child("isWALArchiver"), forbidden))
+		}
+	}
+	return errs
+}
+
+func (cnpgCluster) Restore(req RestoreRequest) Response {
+	c := req.Resource.DeepCopy()
+	// Backups delete their VolumeSnapshots when they're deleted, once their data has been moved.
+	if err := unstructured.SetNestedField(c.Object, string(cnpgv1.SnapshotOwnerReferenceBackup), "spec", "backup", "volumeSnapshot", "snapshotOwnerReference"); err != nil {
+		return Response{Failed: err.Error()}
+	}
+	if req.Live != nil {
+		// CloudNativePG only reads the bootstrap when it creates the cluster.
+		if bootstrap, ok, _ := unstructured.NestedMap(req.Live.Object, "spec", "bootstrap"); ok {
+			_ = unstructured.SetNestedMap(c.Object, bootstrap, "spec", "bootstrap")
+		}
+		for _, role := range roles(c) {
+			keepSize(c, req.Live, "spec", storageField(role), "size")
+		}
+		return Response{Resource: c, Done: true}
+	}
+	if req.From == nil {
+		return Response{Resource: c, Done: true}
+	}
+
+	var captured []Ref
+	for _, d := range req.From.Data {
+		if !isSnapshot(d) {
+			return Response{Failed: fmt.Sprintf("capture must be VolumeSnapshots, not %v", req.From.Data)}
+		}
+		captured = append(captured, Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.From.Namespace, Name: d.Name})
+	}
+	var observe []Ref
+	bound := map[cnpgutils.PVCRole]*boundSnapshot{}
+	for _, ref := range captured {
+		b, o, failed := readBound(ref, req.Observed)
+		if failed != "" {
+			return Response{Failed: failed}
+		}
+		observe = append(observe, o...)
+		if b == nil {
+			continue
+		}
+		role := roleOf(b.snapshot)
+		if _, ok := bound[role]; ok || (role != cnpgutils.PVCRolePgData && role != cnpgutils.PVCRolePgWal) {
+			return Response{Failed: fmt.Sprintf("VolumeSnapshot %s has role %q", ref.Name, role)}
+		}
+		bound[role] = b
+	}
+	if len(bound) < len(captured) {
+		return Response{Observe: observe}
+	}
+
+	var source cnpgv1.DataSource
+	var copies []*unstructured.Unstructured
+	for _, role := range roles(c) {
+		b := bound[role]
+		if b == nil {
+			return Response{Failed: fmt.Sprintf("capture has no %s VolumeSnapshot", role)}
+		}
+		delete(bound, role)
+		name := req.Names.Name("restore-" + nameFor(role))
+		snapshot := metav1.ObjectMeta{Name: name, Namespace: c.GetNamespace(), Labels: cnpgMetadata(b.snapshot.Labels), Annotations: cnpgMetadata(b.snapshot.Annotations)}
+		maps.Copy(snapshot.Labels, req.Labels)
+		copies = append(copies, bind(b.content, req.Names.ClusterName("restore-"+nameFor(role)), snapshot, snapshotv1.VolumeSnapshotContentRetain, req.Labels)...)
+		ref := snapshotRef(name)
+		if role == cnpgutils.PVCRolePgWal {
+			source.WalStorage = &ref
+		} else {
+			source.Storage = ref
+		}
+		// A volume can't be smaller than the snapshot it's restored from.
+		if err := atLeast(c, b.snapshot.Status.RestoreSize, "spec", storageField(role), "size"); err != nil {
+			return Response{Failed: err.Error()}
+		}
+	}
+	for role := range bound {
+		return Response{Failed: fmt.Sprintf("capture has a %s VolumeSnapshot, but spec.%s is not set", role, storageField(role))}
+	}
+	bootstrap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&cnpgv1.BootstrapConfiguration{Recovery: &cnpgv1.BootstrapRecovery{VolumeSnapshots: &source}})
+	if err != nil {
+		return Response{Failed: err.Error()}
+	}
+	if err := unstructured.SetNestedMap(c.Object, bootstrap, "spec", "bootstrap"); err != nil {
+		return Response{Failed: err.Error()}
+	}
+	return Response{Resource: c, Apply: copies, Done: true}
+}
+
+// Ready is true once CloudNativePG reports the cluster ready.
+func (cnpgCluster) Ready(live *unstructured.Unstructured) bool {
+	if live == nil {
+		return false
+	}
+	conditions, _, _ := unstructured.NestedSlice(live.Object, "status", "conditions")
+	for _, c := range conditions {
+		c, _ := c.(map[string]any)
+		if c["type"] == string(cnpgv1.ConditionClusterReady) {
+			return c["status"] == string(metav1.ConditionTrue)
+		}
+	}
+	return false
+}
+
+// Restored is true once the cluster is ready, since its recovery has finished then.
+func (c cnpgCluster) Restored(live *unstructured.Unstructured) bool {
+	return c.Ready(live)
+}
+
+// Capture asks CloudNativePG for a volume snapshot backup, then moves its VolumeSnapshots next to the PreviewSnapshot, with what CloudNativePG needs to recover from them.
+func (cnpgCluster) Capture(req CaptureRequest) Response {
+	backup := Ref{GroupVersionKind: backupGVK, Namespace: req.Resource.GetNamespace(), Name: req.Names.Name("capture")}
+	targets := map[cnpgutils.PVCRole]Ref{}
+	observe := []Ref{backup}
+	for _, role := range roles(req.Resource) {
+		targets[role] = Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.Namespace, Name: req.Names.Name(nameFor(role))}
+		observe = append(observe, targets[role])
+	}
+	for _, ref := range observe {
+		if _, ok := req.Observed[ref]; !ok {
+			return Response{Observe: observe}
+		}
+	}
+
+	backupObj := req.Observed[backup]
+	moved, ready, waiting, failed := allReady(slices.Collect(maps.Values(targets)), req.Observed)
+	switch {
+	case failed != "":
+		return Response{Failed: failed}
+	case moved && !ready:
+		return Response{Observe: observe, Waiting: waiting}
+	case moved && backupObj != nil:
+		return Response{Delete: []Ref{backup}, Observe: observe}
+	case moved:
+		var data []corev1.TypedLocalObjectReference
+		for _, role := range roles(req.Resource) {
+			data = append(data, snapshotRef(targets[role].Name))
+		}
+		return Response{Done: true, Capture: &Capture{Data: data}}
+	}
+
+	if backupObj == nil {
+		b := &cnpgv1.Backup{
+			ObjectMeta: metav1.ObjectMeta{Name: backup.Name, Namespace: backup.Namespace, Labels: req.Labels},
+			Spec: cnpgv1.BackupSpec{
+				Cluster: cnpgv1.LocalObjectReference{Name: req.Resource.GetName()},
+				Method:  cnpgv1.BackupMethodVolumeSnapshot,
+				Online:  ptr.To(req.Online),
+			},
+		}
+		if req.Online {
+			b.Spec.OnlineConfiguration = &cnpgv1.OnlineConfiguration{ImmediateCheckpoint: ptr.To(true)}
+		}
+		return Response{Apply: []*unstructured.Unstructured{toUnstructured(b, backupGVK)}, Observe: observe}
+	}
+	var b cnpgv1.Backup
+	if err := fromUnstructured(backupObj, &b); err != nil {
+		return Response{Failed: err.Error()}
+	}
+	switch b.Status.Phase {
+	case cnpgv1.BackupPhaseCompleted:
+	case cnpgv1.BackupPhaseFailed, cnpgv1.BackupPhaseWalArchivingFailing, cnpgv1.BackupPhaseDefinitionInvalid:
+		return Response{Failed: fmt.Sprintf("Backup %s failed: %s", b.Name, b.Status.Error)}
+	default:
+		return Response{Observe: observe}
+	}
+	elements := b.Status.BackupSnapshotStatus.Elements
+	if len(elements) != len(targets) {
+		return Response{Failed: fmt.Sprintf("Backup %s has %d VolumeSnapshots, not %d", b.Name, len(elements), len(targets))}
+	}
+
+	var apply []*unstructured.Unstructured
+	for _, e := range elements {
+		role := cnpgutils.PVCRole(e.Type)
+		target, ok := targets[role]
+		if !ok {
+			return Response{Failed: fmt.Sprintf("Backup %s has a %s VolumeSnapshot", b.Name, e.Type)}
+		}
+		source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: backup.Namespace, Name: e.Name}
+		observe = append(observe, source)
+		sourceObj, ok := req.Observed[source]
+		if !ok {
+			continue
+		}
+		if sourceObj == nil {
+			return Response{Failed: fmt.Sprintf("VolumeSnapshot %s not found", e.Name)}
+		}
+		var vs snapshotv1.VolumeSnapshot
+		if err := fromUnstructured(sourceObj, &vs); err != nil {
+			return Response{Failed: err.Error()}
+		}
+		meta := metav1.ObjectMeta{Name: target.Name, Namespace: target.Namespace, Labels: cnpgMetadata(vs.Labels), Annotations: cnpgMetadata(vs.Annotations)}
+		maps.Copy(meta.Labels, req.Labels)
+		a, o, failed := move(&vs, meta, req.Names.ClusterName(nameFor(role)), req.Labels, req.Observed)
+		if failed != "" {
+			return Response{Failed: failed}
+		}
+		apply = append(apply, a...)
+		observe = append(observe, o...)
+	}
+	return Response{Apply: apply, Observe: observe}
+}
+
+// allReady reports whether the VolumeSnapshots at refs all exist, whether they're all ready to use, and if not, what they're waiting for.
+func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed string) {
+	var messages []string
+	ready = true
+	for _, ref := range refs {
+		obj := observed[ref]
+		if obj == nil {
+			return false, false, "", ""
+		}
+		r, w, failed := readyToUse(obj)
+		if failed != "" {
+			return false, false, "", failed
+		}
+		ready = ready && r
+		if w != "" {
+			messages = append(messages, w)
+		}
+	}
+	slices.Sort(messages)
+	return true, ready, strings.Join(messages, "; "), ""
+}
+
+// roleOf returns the role of a VolumeSnapshot CloudNativePG took. It's in an annotation, and in a label on snapshots of older versions, which CloudNativePG reads first.
+func roleOf(vs *snapshotv1.VolumeSnapshot) cnpgutils.PVCRole {
+	if role, ok := vs.Labels[cnpgutils.PvcRoleLabelName]; ok {
+		return cnpgutils.PVCRole(role)
+	}
+	return cnpgutils.PVCRole(vs.Annotations[cnpgutils.PvcRoleLabelName])
+}
+
+// cnpgMetadata returns the CloudNativePG labels or annotations in m. It leaves out the cluster label, which marks a cluster's own backups, so copies aren't counted as backups of a cluster with the same name.
+func cnpgMetadata(m map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range m {
+		if strings.HasPrefix(k, cnpgPrefix) && k != cnpgutils.ClusterLabelName {
+			out[k] = v
+		}
+	}
+	return out
+}

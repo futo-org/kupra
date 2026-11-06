@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -20,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/state"
 )
 
 const (
@@ -39,6 +41,7 @@ type PreviewSnapshotReconciler struct {
 }
 
 // +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots/finalizers,verbs=update
+// +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=backups,verbs=list
 
 func (r *PreviewSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var s kuprav1alpha1.PreviewSnapshot
@@ -113,6 +116,18 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 
 	// Its own VolumeSnapshots are garbage collected. This removes what its captures left behind.
 	selector := client.MatchingLabels{LabelSnapshotUID: string(s.UID)}
+	for _, gvk := range state.Leftovers {
+		var list unstructured.UnstructuredList
+		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+		if err := r.APIReader.List(ctx, &list, selector); err != nil && !apimeta.IsNoMatchError(err) {
+			return ctrl.Result{}, err
+		}
+		for i := range list.Items {
+			if err := client.IgnoreNotFound(r.Delete(ctx, &list.Items[i])); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
 	var snapshots snapshotv1.VolumeSnapshotList
 	if err := r.APIReader.List(ctx, &snapshots, selector); err != nil && !apimeta.IsNoMatchError(err) {
 		return ctrl.Result{}, err

@@ -26,3 +26,6 @@ rules:
   - apiGroups: [gateway.networking.k8s.io]
     resources: [grpcroutes, httproutes, tcproutes, tlsroutes, udproutes]
     verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, watch, create, update, patch, delete]

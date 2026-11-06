@@ -55,6 +55,7 @@ func TestPreviews(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "previews"},
 		Spec: kuprav1alpha1.PreviewPolicySpec{
 			NetworkPolicies:   []kuprav1alpha1.NetworkPolicyTemplate{},
+			APIServerAccess:   &kuprav1alpha1.APIServerAccess{},
 			NamespaceMetadata: &kuprav1alpha1.NamespaceMetadata{Labels: map[string]string{"example.com/gateway-access": "previews"}},
 		},
 	})
@@ -190,7 +191,7 @@ template:
 	}
 	var netpols networkingv1.NetworkPolicyList
 	if err := k8s.List(ctx, &netpols, client.InNamespace(nsName)); err != nil || len(netpols.Items) != 0 {
-		t.Errorf("network policies = %v, %v; want none, as the policy has an empty list", netpols.Items, err)
+		t.Errorf("network policies = %v, %v; want none, as the policy has an empty list and no API server access", netpols.Items, err)
 	}
 
 	t.Run("update", func(t *testing.T) {

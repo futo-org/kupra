@@ -20,6 +20,7 @@ import (
 var defaults = kuprav1alpha1.PreviewPolicySpec{
 	Apply:           &kuprav1alpha1.ApplySettings{ClusterRoleRef: meta.LocalObjectReference{Name: "kupra-preview-template"}},
 	NetworkPolicies: []kuprav1alpha1.NetworkPolicyTemplate{{Metadata: kuprav1alpha1.TemplateMetadata{Name: "restrict-egress"}}},
+	APIServerAccess: &kuprav1alpha1.APIServerAccess{PodSelector: &metav1.LabelSelector{}},
 	ResourceQuota:   &corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{corev1.ResourceRequestsCPU: resource.MustParse("4")}},
 	LimitRange:      &corev1.LimitRangeSpec{Limits: []corev1.LimitRangeItem{{Type: corev1.LimitTypeContainer}}},
 	NamespaceMetadata: &kuprav1alpha1.NamespaceMetadata{
@@ -29,7 +30,7 @@ var defaults = kuprav1alpha1.PreviewPolicySpec{
 
 func TestEffectiveFallsBack(t *testing.T) {
 	got := Effective(kuprav1alpha1.PreviewPolicySpec{}, &defaults)
-	if got.Apply.ClusterRoleRef.Name != "kupra-preview-template" || len(got.NetworkPolicies) != 1 || got.ResourceQuota == nil || got.LimitRange == nil {
+	if got.Apply.ClusterRoleRef.Name != "kupra-preview-template" || len(got.NetworkPolicies) != 1 || got.APIServerAccess == nil || got.ResourceQuota == nil || got.LimitRange == nil {
 		t.Errorf("fields left out weren't filled in from the fallback: %+v", got)
 	}
 	if got.NamespaceMetadata.Labels["pod-security.kubernetes.io/enforce"] != "baseline" {
@@ -40,6 +41,7 @@ func TestEffectiveFallsBack(t *testing.T) {
 func TestEffectiveKeepsOwnSettings(t *testing.T) {
 	spec := kuprav1alpha1.PreviewPolicySpec{
 		NetworkPolicies: []kuprav1alpha1.NetworkPolicyTemplate{},
+		APIServerAccess: &kuprav1alpha1.APIServerAccess{},
 		ResourceQuota:   &corev1.ResourceQuotaSpec{},
 		NamespaceMetadata: &kuprav1alpha1.NamespaceMetadata{
 			Labels: map[string]string{
@@ -51,6 +53,9 @@ func TestEffectiveKeepsOwnSettings(t *testing.T) {
 	got := Effective(spec, &defaults)
 	if got.NetworkPolicies == nil || len(got.NetworkPolicies) != 0 {
 		t.Errorf("network policies = %v, want the policy's explicitly empty list", got.NetworkPolicies)
+	}
+	if got.APIServerAccess == nil || got.APIServerAccess.PodSelector != nil {
+		t.Errorf("API server access = %+v, want the policy's, which selects no pods", got.APIServerAccess)
 	}
 	if len(got.ResourceQuota.Hard) != 0 {
 		t.Errorf("resource quota = %v, want the policy's empty one", got.ResourceQuota)

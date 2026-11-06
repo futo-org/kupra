@@ -26,7 +26,7 @@ There are three layers of tests:
 
 kupra's prose reads like Kubernetes' own. When in doubt, find how Kubernetes, controller-runtime or Flux words the same thing, and copy it.
 
-- **Errors and messages,** such as field errors, condition messages and events, are terse: lowercase, no trailing period, one clause. They say what's wrong, not why or how to fix it, in the wording of apimachinery's field errors: `is required`, `must be ...`, `may not be set`, `not found`. For example: `spec.dataSourceRef: Forbidden: may not be set on a claim that's state`.
+- **Errors and messages,** such as field errors, condition messages and events, are terse: lowercase, no trailing period, one clause. They say what's wrong, not why or how to fix it, in the wording of apimachinery's field errors: `is required`, `must be ...`, `may not be set`, `not found`. For example: `spec.dataSourceRef: Forbidden: may not be set on a claim with managed state`.
 - **Doc comments** start with the name and say what it is or does, in one sentence. A second sentence is only for what a caller can't tell from the signature.
 - **Comments** say why, where the code can't. They don't narrate what the code does, compare it with earlier versions, or argue for the design: that belongs in the ADRs.
 - **CRD descriptions and flag help** are one short sentence, like those of Kubernetes' own types.

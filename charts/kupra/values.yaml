@@ -53,6 +53,11 @@ defaultPolicy:
                   except:
                     - fc00::/7
                     - fe80::/10
+  apiServerAccess:
+    podSelector:
+      matchExpressions:
+        - key: cnpg.io/cluster
+          operator: Exists
   resourceQuota:
     hard:
       requests.cpu: "4"

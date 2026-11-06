@@ -8,15 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
-)
-
-var (
-	volumeSnapshotGVK        = snapshotv1.SchemeGroupVersion.WithKind("VolumeSnapshot")
-	volumeSnapshotContentGVK = snapshotv1.SchemeGroupVersion.WithKind("VolumeSnapshotContent")
 )
 
 // persistentVolumeClaim supports PersistentVolumeClaims, through VolumeSnapshots.
@@ -27,11 +20,11 @@ func (persistentVolumeClaim) Check(resource map[string]any, fldPath *field.Path)
 	var errs field.ErrorList
 	for _, key := range []string{"dataSource", "dataSourceRef", "dataSourceExpr", "dataSourceRefExpr"} {
 		if _, ok := spec[key]; ok {
-			errs = append(errs, field.Forbidden(fldPath.Child("spec", key), "may not be set on a claim that's state"))
+			errs = append(errs, field.Forbidden(fldPath.Child("spec", key), "may not be set on a claim with managed state"))
 		}
 	}
 	if _, ok := resource["specExpr"]; ok {
-		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), "may not be set on a claim that's state"))
+		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), "may not be set on a claim with managed state"))
 	}
 	return errs
 }
@@ -43,56 +36,31 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 	if req.From == nil {
 		return Response{Resource: req.Resource, Done: true}
 	}
-	if len(req.From.Data) != 1 || req.From.Data[0].Kind != volumeSnapshotGVK.Kind || ptr.Deref(req.From.Data[0].APIGroup, "") != volumeSnapshotGVK.Group {
+	if len(req.From.Data) != 1 || !isSnapshot(req.From.Data[0]) {
 		return Response{Failed: fmt.Sprintf("capture must be one VolumeSnapshot, not %v", req.From.Data)}
 	}
 
 	captured := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.From.Namespace, Name: req.From.Data[0].Name}
-	vsObj, ok := req.Observed[captured]
-	if !ok {
-		return Response{Observe: []Ref{captured}}
+	bound, observe, failed := readBound(captured, req.Observed)
+	if failed != "" {
+		return Response{Failed: failed}
 	}
-	if vsObj == nil {
-		return Response{Failed: fmt.Sprintf("VolumeSnapshot %s/%s not found", captured.Namespace, captured.Name)}
-	}
-	var vs snapshotv1.VolumeSnapshot
-	if err := fromUnstructured(vsObj, &vs); err != nil {
-		return Response{Failed: err.Error()}
-	}
-	if vs.Status == nil || vs.Status.BoundVolumeSnapshotContentName == nil {
-		return Response{Observe: []Ref{captured}}
-	}
-	contentRef := Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: *vs.Status.BoundVolumeSnapshotContentName}
-	contentObj, ok := req.Observed[contentRef]
-	if !ok || contentObj == nil {
-		return Response{Observe: []Ref{captured, contentRef}}
-	}
-	var content snapshotv1.VolumeSnapshotContent
-	if err := fromUnstructured(contentObj, &content); err != nil {
-		return Response{Failed: err.Error()}
-	}
-	if snapshotHandle(&content) == nil {
-		return Response{Observe: []Ref{captured, contentRef}}
+	if bound == nil {
+		return Response{Observe: observe}
 	}
 
 	namespace := req.Resource.GetNamespace()
 	name := req.Names.Name("restore")
-	copied := bind(&content, req.Names.ClusterName("restore"), namespace, name, snapshotv1.VolumeSnapshotContentRetain, req.Labels)
+	copied := bind(bound.content, req.Names.ClusterName("restore"), metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: req.Labels}, snapshotv1.VolumeSnapshotContentRetain, req.Labels)
 
 	claim := req.Resource.DeepCopy()
-	apiGroup := volumeSnapshotGVK.Group
-	ref := map[string]any{"apiGroup": apiGroup, "kind": volumeSnapshotGVK.Kind, "name": name}
+	ref := map[string]any{"apiGroup": volumeSnapshotGVK.Group, "kind": volumeSnapshotGVK.Kind, "name": name}
 	if err := unstructured.SetNestedMap(claim.Object, ref, "spec", "dataSourceRef"); err != nil {
 		return Response{Failed: err.Error()}
 	}
 	// A claim can't be smaller than the snapshot it's restored from.
-	if vs.Status.RestoreSize != nil {
-		requested, _, _ := unstructured.NestedString(claim.Object, "spec", "resources", "requests", "storage")
-		if q, err := resource.ParseQuantity(requested); err != nil || q.Cmp(*vs.Status.RestoreSize) < 0 {
-			if err := unstructured.SetNestedField(claim.Object, vs.Status.RestoreSize.String(), "spec", "resources", "requests", "storage"); err != nil {
-				return Response{Failed: err.Error()}
-			}
-		}
+	if err := atLeast(claim, bound.snapshot.Status.RestoreSize, "spec", "resources", "requests", "storage"); err != nil {
+		return Response{Failed: err.Error()}
 	}
 	return Response{Resource: claim, Apply: copied, Done: true}
 }
@@ -108,7 +76,7 @@ func (persistentVolumeClaim) Restored(live *unstructured.Unstructured) bool {
 	return phase == string(corev1.ClaimBound)
 }
 
-// Capture takes a VolumeSnapshot of the claim, then moves it next to the PreviewSnapshot: it binds the storage snapshot to a VolumeSnapshotContent there, the only one that deletes it.
+// Capture takes a VolumeSnapshot of the claim, then moves it next to the PreviewSnapshot.
 func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	source := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.Resource.GetNamespace(), Name: req.Names.Name("capture")}
 	target := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: req.Namespace, Name: req.Names.Name("data")}
@@ -119,17 +87,17 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	}
 
 	if targetObj != nil {
-		var vs snapshotv1.VolumeSnapshot
-		if err := fromUnstructured(targetObj, &vs); err != nil {
-			return Response{Failed: err.Error()}
+		ready, waiting, failed := readyToUse(targetObj)
+		if failed != "" {
+			return Response{Failed: failed}
 		}
-		if vs.Status == nil || vs.Status.ReadyToUse == nil || !*vs.Status.ReadyToUse {
-			return Response{Observe: []Ref{source, target}, Waiting: snapshotError(&vs)}
+		if !ready {
+			return Response{Observe: []Ref{source, target}, Waiting: waiting}
 		}
 		if sourceObj != nil {
 			return Response{Delete: []Ref{source}, Observe: []Ref{source, target}}
 		}
-		return Response{Done: true, Capture: &Capture{Data: []corev1.TypedLocalObjectReference{{APIGroup: &volumeSnapshotGVK.Group, Kind: target.Kind, Name: target.Name}}}}
+		return Response{Done: true, Capture: &Capture{Data: []corev1.TypedLocalObjectReference{snapshotRef(target.Name)}}}
 	}
 
 	if sourceObj == nil {
@@ -145,99 +113,14 @@ func (persistentVolumeClaim) Capture(req CaptureRequest) Response {
 	if err := fromUnstructured(sourceObj, &vs); err != nil {
 		return Response{Failed: err.Error()}
 	}
-	if vs.Status == nil || vs.Status.ReadyToUse == nil || !*vs.Status.ReadyToUse || vs.Status.BoundVolumeSnapshotContentName == nil {
+	if vs.Status == nil || vs.Status.ReadyToUse == nil || !*vs.Status.ReadyToUse {
 		return Response{Observe: []Ref{source, target}, Waiting: snapshotError(&vs)}
 	}
-	contentRef := Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: *vs.Status.BoundVolumeSnapshotContentName}
-	contentObj, ok := req.Observed[contentRef]
-	if !ok || contentObj == nil {
-		return Response{Observe: []Ref{source, target, contentRef}}
+	apply, observe, failed := move(&vs, metav1.ObjectMeta{Name: target.Name, Namespace: target.Namespace, Labels: req.Labels}, req.Names.ClusterName("data"), req.Labels, req.Observed)
+	if failed != "" {
+		return Response{Failed: failed}
 	}
-	var content snapshotv1.VolumeSnapshotContent
-	if err := fromUnstructured(contentObj, &content); err != nil {
-		return Response{Failed: err.Error()}
-	}
-	// The source's content must outlive the preview's namespace, and be found again to be deleted with the PreviewSnapshot.
-	if content.Spec.DeletionPolicy != snapshotv1.VolumeSnapshotContentRetain || !hasLabels(content.Labels, req.Labels) {
-		u := &unstructured.Unstructured{Object: map[string]any{
-			"metadata": map[string]any{"name": content.Name, "labels": stringMap(req.Labels)},
-			"spec":     map[string]any{"deletionPolicy": string(snapshotv1.VolumeSnapshotContentRetain)},
-		}}
-		u.SetGroupVersionKind(volumeSnapshotContentGVK)
-		return Response{Apply: []*unstructured.Unstructured{u}, Observe: []Ref{source, target, contentRef}}
-	}
-	if snapshotHandle(&content) == nil {
-		return Response{Observe: []Ref{source, target, contentRef}}
-	}
-	moved := bind(&content, req.Names.ClusterName("data"), target.Namespace, target.Name, snapshotv1.VolumeSnapshotContentDelete, req.Labels)
-	return Response{Apply: moved, Observe: []Ref{source, target}}
-}
-
-// bind returns a VolumeSnapshotContent for the storage snapshot behind content, and a VolumeSnapshot bound to it.
-func bind(content *snapshotv1.VolumeSnapshotContent, contentName, namespace, name string, policy snapshotv1.DeletionPolicy, labels map[string]string) []*unstructured.Unstructured {
-	c := &snapshotv1.VolumeSnapshotContent{
-		ObjectMeta: metav1.ObjectMeta{Name: contentName, Labels: labels},
-		Spec: snapshotv1.VolumeSnapshotContentSpec{
-			DeletionPolicy:          policy,
-			Driver:                  content.Spec.Driver,
-			Source:                  snapshotv1.VolumeSnapshotContentSource{SnapshotHandle: snapshotHandle(content)},
-			VolumeSnapshotClassName: content.Spec.VolumeSnapshotClassName,
-			SourceVolumeMode:        content.Spec.SourceVolumeMode,
-			VolumeSnapshotRef:       corev1.ObjectReference{Namespace: namespace, Name: name},
-		},
-	}
-	vs := &snapshotv1.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
-		Spec: snapshotv1.VolumeSnapshotSpec{
-			Source:                  snapshotv1.VolumeSnapshotSource{VolumeSnapshotContentName: &contentName},
-			VolumeSnapshotClassName: content.Spec.VolumeSnapshotClassName,
-		},
-	}
-	return []*unstructured.Unstructured{toUnstructured(c, volumeSnapshotContentGVK), toUnstructured(vs, volumeSnapshotGVK)}
-}
-
-func snapshotError(vs *snapshotv1.VolumeSnapshot) string {
-	if vs.Status == nil || vs.Status.Error == nil || vs.Status.Error.Message == nil {
-		return ""
-	}
-	return fmt.Sprintf("VolumeSnapshot %s: %s", vs.Name, *vs.Status.Error.Message)
-}
-
-func toUnstructured(obj runtime.Object, gvk schema.GroupVersionKind) *unstructured.Unstructured {
-	content, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-	if err != nil {
-		panic(err)
-	}
-	u := &unstructured.Unstructured{Object: content}
-	u.SetGroupVersionKind(gvk)
-	unstructured.RemoveNestedField(u.Object, "metadata", "creationTimestamp")
-	unstructured.RemoveNestedField(u.Object, "status")
-	dropNulls(u.Object)
-	return u
-}
-
-// dropNulls removes the nulls left by fields without omitempty, which CRD schemas reject.
-func dropNulls(m map[string]any) {
-	for k, v := range m {
-		switch v := v.(type) {
-		case nil:
-			delete(m, k)
-		case map[string]any:
-			dropNulls(v)
-		}
-	}
-}
-
-func stringMap(m map[string]string) map[string]any {
-	out := map[string]any{}
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
-func fromUnstructured(u *unstructured.Unstructured, obj any) error {
-	return runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, obj)
+	return Response{Apply: apply, Observe: append([]Ref{source, target}, observe...)}
 }
 
 // keepRestored keeps a live claim's data source and size, which can't change and can't shrink.
@@ -249,32 +132,26 @@ func keepRestored(rendered, live *unstructured.Unstructured) *unstructured.Unstr
 	if ref, ok, _ := unstructured.NestedMap(live.Object, "spec", "dataSource"); ok {
 		_ = unstructured.SetNestedMap(claim.Object, ref, "spec", "dataSource")
 	}
-	liveSize, _, _ := unstructured.NestedString(live.Object, "spec", "resources", "requests", "storage")
-	size, _, _ := unstructured.NestedString(claim.Object, "spec", "resources", "requests", "storage")
-	if l, err := resource.ParseQuantity(liveSize); err == nil {
-		if s, err := resource.ParseQuantity(size); err != nil || s.Cmp(l) < 0 {
-			_ = unstructured.SetNestedField(claim.Object, liveSize, "spec", "resources", "requests", "storage")
-		}
-	}
+	keepSize(claim, live, "spec", "resources", "requests", "storage")
 	return claim
 }
 
-// snapshotHandle is a content's storage snapshot: in its spec if it was bound to an existing one, otherwise in its status.
-func snapshotHandle(content *snapshotv1.VolumeSnapshotContent) *string {
-	if content.Spec.Source.SnapshotHandle != nil {
-		return content.Spec.Source.SnapshotHandle
+// keepSize keeps a live object's size at fields if the rendered one is smaller.
+func keepSize(rendered, live *unstructured.Unstructured, fields ...string) {
+	liveSize, _, _ := unstructured.NestedString(live.Object, fields...)
+	if l, err := resource.ParseQuantity(liveSize); err == nil {
+		_ = atLeast(rendered, &l, fields...)
 	}
-	if content.Status != nil {
-		return content.Status.SnapshotHandle
-	}
-	return nil
 }
 
-func hasLabels(labels, want map[string]string) bool {
-	for k, v := range want {
-		if labels[k] != v {
-			return false
-		}
+// atLeast raises the size at fields to min, if it's smaller or not set.
+func atLeast(obj *unstructured.Unstructured, min *resource.Quantity, fields ...string) error {
+	if min == nil {
+		return nil
 	}
-	return true
+	size, _, _ := unstructured.NestedString(obj.Object, fields...)
+	if q, err := resource.ParseQuantity(size); err == nil && q.Cmp(*min) >= 0 {
+		return nil
+	}
+	return unstructured.SetNestedField(obj.Object, min.String(), fields...)
 }
