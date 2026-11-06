@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -173,4 +174,28 @@ func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed
 	}
 	slices.Sort(messages)
 	return true, ready, strings.Join(messages, "; "), ""
+}
+
+// restoreCopies returns the restore copies that don't exist yet, to apply, and whether all of them are ready to use, or what they're waiting for. A copy that exists isn't applied again: its content's volumeSnapshotRef is replaced as a whole, which would drop the UID the snapshot controller bound it with.
+func restoreCopies(copies map[Ref][]*unstructured.Unstructured, observed Observed) (apply []*unstructured.Unstructured, observe []Ref, ready bool, waiting, failed string) {
+	var messages []string
+	ready = true
+	for _, ref := range slices.SortedFunc(maps.Keys(copies), func(a, b Ref) int { return strings.Compare(a.Name, b.Name) }) {
+		observe = append(observe, ref)
+		obj := observed[ref]
+		if obj == nil {
+			apply = append(apply, copies[ref]...)
+			ready = false
+			continue
+		}
+		r, w, f := readyToUse(obj)
+		if f != "" {
+			return nil, nil, false, "", f
+		}
+		ready = ready && r
+		if w != "" {
+			messages = append(messages, w)
+		}
+	}
+	return apply, observe, ready, strings.Join(messages, "; "), ""
 }

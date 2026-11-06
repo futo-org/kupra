@@ -1,6 +1,7 @@
 package state
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -315,24 +316,34 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 	}
 }
 
-// restore calls a kind's Restore until it's done, playing the snapshot controller, which binds the restore copies a call applies before the next call. It fails the test if the kind is done before the copies it applies are bound.
+// restore calls a kind's Restore until it's done, playing the snapshot controller, which binds the restore copies a call applies before the next call: it marks them ready, and records their VolumeSnapshot's UID in their content. It fails the test if the kind is done before the copies it applied are bound, or if it applies a copy again and drops that UID.
 func restore(t *testing.T, kind Kind, req *RestoreRequest, c cluster) Response {
 	t.Helper()
+	var copies []Ref
 	for range 8 {
 		resp := kind.Restore(*req)
 		if resp.Failed != "" {
 			t.Fatal(resp.Failed)
 		}
-		var copies []Ref
+		var applied []Ref
 		for _, obj := range resp.Apply {
 			if obj.GetKind() == volumeSnapshotGVK.Kind {
-				copies = append(copies, RefOf(obj))
+				applied = append(applied, RefOf(obj))
 			}
 		}
 		if resp.Done {
+			for _, ref := range applied {
+				if c[ref] == nil {
+					t.Errorf("restore is done before its copy %s exists", ref.Name)
+				}
+			}
+			c.step(resp)
 			for _, ref := range copies {
-				if ready, _, _ := unstructured.NestedBool(c[ref].Object, "status", "readyToUse"); c[ref] == nil || !ready {
+				if ready, _, _ := unstructured.NestedBool(c[ref].Object, "status", "readyToUse"); !ready {
 					t.Errorf("restore is done before its copy %s is bound", ref.Name)
+				}
+				if uid, _, _ := unstructured.NestedString(c[contentOf(t, c, ref)].Object, "spec", "volumeSnapshotRef", "uid"); uid == "" {
+					t.Errorf("restore applied its copy %s again, dropping the UID its content was bound with", ref.Name)
 				}
 			}
 			return resp
@@ -341,11 +352,25 @@ func restore(t *testing.T, kind Kind, req *RestoreRequest, c cluster) Response {
 			t.Errorf("restore returned %s before it's done", resp.Resource.GetName())
 		}
 		c.step(resp)
-		for _, ref := range copies {
+		for _, ref := range applied {
 			_ = unstructured.SetNestedField(c[ref].Object, true, "status", "readyToUse")
+			_ = unstructured.SetNestedField(c[contentOf(t, c, ref)].Object, "uid-"+ref.Name, "spec", "volumeSnapshotRef", "uid")
+			if !slices.Contains(copies, ref) {
+				copies = append(copies, ref)
+			}
 		}
 		req.Observed = c.step(Response{Observe: resp.Observe})
 	}
 	t.Fatal("restore isn't done")
 	return Response{}
+}
+
+// contentOf returns the content a restore copy is bound to.
+func contentOf(t *testing.T, c cluster, ref Ref) Ref {
+	t.Helper()
+	name, _, _ := unstructured.NestedString(c[ref].Object, "spec", "source", "volumeSnapshotContentName")
+	if c[Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: name}] == nil {
+		t.Fatalf("copy %s has no content %q", ref.Name, name)
+	}
+	return Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: name}
 }

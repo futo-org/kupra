@@ -164,8 +164,7 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 	}
 
 	var source cnpgv1.DataSource
-	var copies []*unstructured.Unstructured
-	var copyRefs []Ref
+	copies := map[Ref][]*unstructured.Unstructured{}
 	for _, role := range roles(c) {
 		b := bound[role]
 		if b == nil {
@@ -175,8 +174,8 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 		name := req.Names.Name("restore-" + nameFor(role))
 		snapshot := metav1.ObjectMeta{Name: name, Namespace: c.GetNamespace(), Labels: cnpgMetadata(b.snapshot.Labels), Annotations: cnpgMetadata(b.snapshot.Annotations)}
 		maps.Copy(snapshot.Labels, req.Labels)
-		copies = append(copies, bind(b.content, req.Names.ClusterName("restore-"+nameFor(role)), snapshot, snapshotv1.VolumeSnapshotContentRetain, req.Labels)...)
-		copyRefs = append(copyRefs, Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: snapshot.Namespace, Name: name})
+		copyRef := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: snapshot.Namespace, Name: name}
+		copies[copyRef] = bind(b.content, req.Names.ClusterName("restore-"+nameFor(role)), snapshot, snapshotv1.VolumeSnapshotContentRetain, req.Labels)
 		ref := snapshotRef(name)
 		if role == cnpgutils.PVCRolePgWal {
 			source.WalStorage = &ref
@@ -199,12 +198,14 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 		return Response{Failed: err.Error()}
 	}
 	// CloudNativePG's first recovery attempt fails on copies that aren't bound yet, so the cluster waits for them.
-	if _, ready, waiting, failed := allReady(copyRefs, req.Observed); failed != "" {
+	apply, observeCopies, ready, waiting, failed := restoreCopies(copies, req.Observed)
+	if failed != "" {
 		return Response{Failed: failed}
-	} else if !ready {
-		return Response{Apply: copies, Observe: append(observe, copyRefs...), Waiting: waiting}
 	}
-	return Response{Resource: c, Apply: copies, Done: true}
+	if !ready {
+		return Response{Apply: apply, Observe: append(observe, observeCopies...), Waiting: waiting}
+	}
+	return Response{Resource: c, Done: true}
 }
 
 // Ready is true once CloudNativePG reports the cluster ready.
