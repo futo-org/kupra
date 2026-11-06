@@ -49,9 +49,9 @@ jobs:
               echo
               echo '```diff'
               # A comment holds up to 65536 characters.
-              head -c 60000 "$RUNNER_TEMP/chart.diff"
-              # The cut can fall within a line, which the fence has to start after.
-              printf '\n```\n'
+              # The cut can fall within a line, which gets a newline so the fence starts on its own.
+              head -c 60000 "$RUNNER_TEMP/chart.diff" | sed '$a\'
+              echo '```'
               if [ "$(wc -c <"$RUNNER_TEMP/chart.diff")" -gt 60000 ]; then
                 echo
                 echo 'The diff is cut short. Run `mise run chart:diff` for all of it.'
