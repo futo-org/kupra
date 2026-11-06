@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/conditions"
@@ -48,12 +49,15 @@ func (r *PreviewPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Status().Patch(ctx, &p, patch); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Whether kupra may bind a role depends on bindings it doesn't watch, so it's checked again.
 	if reason != meta.SucceededReason {
-		// A ClusterRole kupra may not bind yet can be approved without the policy or the role changing.
 		return ctrl.Result{RequeueAfter: recheckInterval}, nil
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: readyRecheckInterval}, nil
 }
+
+// readyRecheckInterval is how often a policy previews can use is checked again.
+const readyRecheckInterval = 10 * time.Minute
 
 // check works out whether previews can use a policy: it must name a template role, or fall back to one, which exists and kupra may bind.
 func (r *PreviewPolicyReconciler) check(ctx context.Context, p *kuprav1alpha1.PreviewPolicy) (reason, message string, err error) {
