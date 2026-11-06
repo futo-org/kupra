@@ -3,16 +3,24 @@ app.kubernetes.io/name: kupra-operator
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{- /* commonLabels can add labels, but not replace the chart's own. */}}
-{{- define "kupra.labels" -}}
-{{- $labels := dict
+{{- /*
+kupra.labelsWith renders an object's labels as one map: the given labels, which win, then the chart's own, then extra, then commonLabels.
+It takes a dict with ctx, the root context, labels, and optionally extra.
+*/}}
+{{- define "kupra.labelsWith" -}}
+{{- $ctx := .ctx }}
+{{- $own := dict
   "app.kubernetes.io/part-of" "kupra"
-  "app.kubernetes.io/version" .Chart.AppVersion
-  "app.kubernetes.io/managed-by" .Release.Service
-  "helm.sh/chart" (printf "%s-%s" .Chart.Name .Chart.Version) }}
-{{- toYaml (merge $labels (.Values.commonLabels | default dict)) }}
+  "app.kubernetes.io/version" $ctx.Chart.AppVersion
+  "app.kubernetes.io/managed-by" $ctx.Release.Service
+  "helm.sh/chart" (printf "%s-%s" $ctx.Chart.Name $ctx.Chart.Version) }}
+{{- toYaml (merge (deepCopy (.labels | default dict)) $own (deepCopy (.extra | default dict)) (deepCopy ($ctx.Values.commonLabels | default dict))) }}
+{{- end }}
+
+{{- define "kupra.labels" -}}
+{{- include "kupra.labelsWith" (dict "ctx" .) }}
 {{- end }}
 
 {{- define "kupra.operator.labels" -}}
-{{- toYaml (merge (include "kupra.operator.selectorLabels" . | fromYaml) (include "kupra.labels" . | fromYaml)) }}
+{{- include "kupra.labelsWith" (dict "ctx" . "labels" (include "kupra.operator.selectorLabels" . | fromYaml)) }}
 {{- end }}

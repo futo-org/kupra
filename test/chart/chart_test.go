@@ -3,7 +3,9 @@ package chart
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -67,5 +69,44 @@ func TestCommonLabelsKeepSelectors(t *testing.T) {
 				t.Errorf("%s %s selects %s=%s, but the operator's pods have %q", u.GetKind(), u.GetName(), k, v, pods[k])
 			}
 		}
+	}
+}
+
+// commonLabels can't replace the labels that aggregate the base roles into kupra's template and operator roles, and operator.podLabels win over commonLabels on the operator's pods.
+func TestLabelPrecedence(t *testing.T) {
+	objs := render(t,
+		"--set-string", "commonLabels.kupra\\.futo\\.tech/aggregate-to-template=false",
+		"--set-string", "commonLabels.kupra\\.futo\\.tech/aggregate-to-operator=false",
+		"--set", "commonLabels.team=common",
+		"--set", "operator.podLabels.team=pods",
+	)
+	for _, u := range objs {
+		labels := u.GetLabels()
+		switch {
+		case u.GetName() == "kupra-preview-template-base" && labels["kupra.futo.tech/aggregate-to-template"] != "true":
+			t.Errorf("ClusterRole %s is labelled aggregate-to-template %q, want true", u.GetName(), labels["kupra.futo.tech/aggregate-to-template"])
+		case u.GetName() == "kupra-operator-bind-base" && labels["kupra.futo.tech/aggregate-to-operator"] != "true":
+			t.Errorf("ClusterRole %s is labelled aggregate-to-operator %q, want true", u.GetName(), labels["kupra.futo.tech/aggregate-to-operator"])
+		case u.GetKind() == "Deployment":
+			pods, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "labels")
+			if pods["team"] != "pods" {
+				t.Errorf("the operator's pods are labelled team %q, want podLabels' pods", pods["team"])
+			}
+		}
+	}
+}
+
+// kupra can be a dependency of another chart, which gives it Helm's global values.
+func TestRendersAsDependency(t *testing.T) {
+	umbrella := t.TempDir()
+	if err := os.CopyFS(filepath.Join(umbrella, "charts", "kupra"), os.DirFS("../../charts/kupra")); err != nil {
+		t.Fatal(err)
+	}
+	chart := "apiVersion: v2\nname: umbrella\nversion: 0.1.0\ndependencies:\n  - name: kupra\n    version: \">=0.0.0-0\"\n"
+	if err := os.WriteFile(filepath.Join(umbrella, "Chart.yaml"), []byte(chart), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("helm", "template", "umbrella", umbrella, "--set", "global.example=yes").CombinedOutput(); err != nil {
+		t.Errorf("rendering kupra as a dependency: %v\n%s", err, out)
 	}
 }

@@ -14,8 +14,7 @@ kind: ClusterRole
 metadata:
   name: kupra-preview-template-base
   labels:
-    kupra.futo.tech/aggregate-to-template: "true"
-    {{- include "kupra.labels" . | nindent 4 }}
+    {{- include "kupra.labelsWith" (dict "ctx" . "labels" (dict "kupra.futo.tech/aggregate-to-template" "true")) | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [configmaps, persistentvolumeclaims, secrets, services]

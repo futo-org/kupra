@@ -37,8 +37,7 @@ kind: ClusterRole
 metadata:
   name: kupra-operator-bind-base
   labels:
-    kupra.futo.tech/aggregate-to-operator: "true"
-    {{- include "kupra.labels" . | nindent 4 }}
+    {{- include "kupra.labelsWith" (dict "ctx" . "labels" (dict "kupra.futo.tech/aggregate-to-operator" "true")) | nindent 4 }}
 rules:
   - apiGroups: [rbac.authorization.k8s.io]
     resources: [clusterroles]
