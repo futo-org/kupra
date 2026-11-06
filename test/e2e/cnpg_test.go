@@ -11,6 +11,7 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -126,8 +127,9 @@ func TestClusterState(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, 5*time.Minute, func() error {
-		if err := k8s.Get(ctx, client.ObjectKeyFromObject(source), &kuprav1alpha1.Preview{}); !apierrors.IsNotFound(err) {
-			return fmt.Errorf("Preview source still exists (%v)", err)
+		var p kuprav1alpha1.Preview
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(source), &p); !apierrors.IsNotFound(err) {
+			return fmt.Errorf("Preview source still exists (%v): %s, Ready %+v", err, p.Status.Phase, apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition))
 		}
 		return nil
 	})
