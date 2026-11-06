@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "commonLabels": {
-      "description": "Labels added to every object the chart creates.",
+      "description": "Labels added to every object the chart templates, but not its CRDs. They can't replace the chart's own labels.",
       "type": "object",
       "additionalProperties": {"type": "string"}
     },
