@@ -17,7 +17,7 @@ spec:
     tag: pr-1234
 ```
 
-kupra creates a namespace for the preview, applies the app's template there, and reports progress in the Preview's status. `kubectl get previews` shows its phase and why it isn't ready yet, and `-o wide` adds its namespace. Its links, such as its URL, are in `status.links`.
+kupra creates a namespace for the preview, applies the app's template there, and reports progress in the Preview's status. `kubectl get previews --namespace immich-previews` shows its phase and why it isn't ready yet, and `-o wide` adds its namespace. Its links, such as its URL, are in `status.links`.
 
 The people who can change, reset and delete a preview are whoever created it, and anyone listed in `spec.owners`.
 
@@ -39,7 +39,7 @@ spec:
       name: pr-1234
 ```
 
-Snapshotting a preview takes the `snapshot` permission on it, which its owners have if they can also create snapshots, and `kupra-admin` has for every preview. By default, a capture is `Offline`: kupra stops the preview's app while it captures, so the data is consistent, and starts it again afterwards. `mode: Online` keeps the app running. The snapshot is ready to use once `kubectl get previewsnapshots` shows it Ready. It outlives the preview it was taken from.
+Snapshotting a preview takes the `snapshot` permission on it, which its owners have if they can also create snapshots, and `kupra-admin` has for every preview. By default, a capture is `Offline`: kupra stops the preview's app while it captures, so the data is consistent, and starts it again afterwards. `mode: Online` keeps the app running. The snapshot is ready to use once `kubectl get previewsnapshots --namespace immich-previews` shows it Ready. It outlives the preview it was taken from.
 
 ## Start from a snapshot
 
@@ -60,7 +60,7 @@ A snapshot can't be deleted while a preview is being restored from it, or names 
 Resetting puts a preview's state back to where it started: from the snapshot its `restoreFrom` picks now, or empty. Set the reset annotation to a new value, such as the time:
 
 ```sh
-kubectl annotate preview pr-1234 --overwrite kupra.futo.tech/reset-requested-at="$(date +%s)"
+kubectl annotate preview pr-1234 --namespace immich-previews --overwrite kupra.futo.tech/reset-requested-at="$(date +%s)"
 ```
 
 ## Delete a preview
