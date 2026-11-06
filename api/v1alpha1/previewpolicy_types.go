@@ -103,7 +103,7 @@ type PreviewPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Spec is the settings for preview namespaces.
+	// Spec is the settings for preview namespaces. Fields left out are taken from the default PreviewPolicy.
 	Spec PreviewPolicySpec `json:"spec,omitempty"`
 	// Status says whether previews can use the policy.
 	// +optional
