@@ -20,11 +20,13 @@ import (
 	"github.com/fluxcd/pkg/runtime/conditions"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/names"
 )
 
 func TestSameObject(t *testing.T) {
@@ -364,5 +366,41 @@ func TestSnapshotUnready(t *testing.T) {
 		if reason, _ := snapshotUnready(&tc.s); reason != tc.reason {
 			t.Errorf("%s: reason %q, want %q", tc.name, reason, tc.reason)
 		}
+	}
+}
+
+// A preview deleted before the cache has seen its namespace still deletes it.
+func TestDeleteBeforeNamespaceCached(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kuprav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	p := &kuprav1alpha1.Preview{ObjectMeta: metav1.ObjectMeta{Name: "pr", Namespace: "ns", UID: "uid"}}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        names.PreviewNamespace(p.Namespace, p.Name),
+		Annotations: map[string]string{AnnotationPreviewUID: string(p.UID)},
+	}}
+	live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).
+		WithIndex(&kuprav1alpha1.PreviewSnapshot{}, sourceIndex, func(obj client.Object) []string {
+			return []string{obj.(*kuprav1alpha1.PreviewSnapshot).Spec.Source.PreviewRef.Name}
+		}).Build()
+	cache := interceptor.NewClient(live, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*corev1.Namespace); ok {
+				return apierrors.NewNotFound(corev1.Resource("namespaces"), key.Name)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+	r := &PreviewReconciler{Client: cache, APIReader: live}
+	if _, done, err := r.reconcileDelete(ctx, p); err != nil || done {
+		t.Fatalf("reconcileDelete = done %v, %v; want it waiting for the namespace", done, err)
+	}
+	if err := live.Get(ctx, client.ObjectKeyFromObject(ns), &corev1.Namespace{}); !apierrors.IsNotFound(err) {
+		t.Errorf("namespace: %v, want it deleted", err)
 	}
 }
