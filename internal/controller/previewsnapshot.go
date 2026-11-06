@@ -25,10 +25,6 @@ import (
 )
 
 const (
-	ReasonPreviewNotFound = "PreviewNotFound"
-	ReasonPreviewDeleted  = "PreviewDeleted"
-	ReasonInUse           = "InUse"
-
 	// heldInterval is how often a held deletion is checked again.
 	heldInterval = 30 * time.Second
 )
