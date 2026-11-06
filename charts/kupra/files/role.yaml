@@ -45,6 +45,7 @@ rules:
   - kupra.futo.tech
   resources:
   - previewapps/status
+  - previewpolicies/status
   - previews/status
   - previewsnapshots/status
   verbs:

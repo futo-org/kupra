@@ -48,23 +48,32 @@ func Resolve(ctx context.Context, c client.Reader, namespace string) (string, ku
 	if err != nil {
 		return "", kuprav1alpha1.PreviewPolicySpec{}, err
 	}
+	settings, err := Settings(ctx, c, p)
+	if err != nil {
+		return "", kuprav1alpha1.PreviewPolicySpec{}, err
+	}
+	return p.Name, settings, nil
+}
+
+// Settings returns a PreviewPolicy's settings, with the default PreviewPolicy's filled in for any field it leaves out.
+func Settings(ctx context.Context, c client.Reader, p *kuprav1alpha1.PreviewPolicy) (kuprav1alpha1.PreviewPolicySpec, error) {
 	var fallback *kuprav1alpha1.PreviewPolicySpec
 	if p.Name != DefaultName {
 		// Without the default policy, fields a policy leaves out would quietly mean no network policies or quota.
 		var d kuprav1alpha1.PreviewPolicy
 		if err := c.Get(ctx, client.ObjectKey{Name: DefaultName}, &d); err != nil {
 			if apierrors.IsNotFound(err) {
-				return "", kuprav1alpha1.PreviewPolicySpec{}, &NotFoundError{Name: DefaultName}
+				return kuprav1alpha1.PreviewPolicySpec{}, &NotFoundError{Name: DefaultName}
 			}
-			return "", kuprav1alpha1.PreviewPolicySpec{}, err
+			return kuprav1alpha1.PreviewPolicySpec{}, err
 		}
 		fallback = &d.Spec
 	}
 	settings := Effective(p.Spec, fallback)
 	if settings.Apply == nil {
-		return p.Name, settings, &NoTemplateRoleError{Name: p.Name}
+		return settings, &NoTemplateRoleError{Name: p.Name}
 	}
-	return p.Name, settings, nil
+	return settings, nil
 }
 
 // Effective fills in the fields a policy leaves out from the fallback. Labels and annotations are merged, with the policy's own over the fallback's.
