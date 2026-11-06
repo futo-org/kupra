@@ -34,59 +34,8 @@ defaultPolicy:
 
 ## CloudNativePG
 
-CloudNativePG's pods talk to the Kubernetes API server. The default PreviewPolicy's `restrict-egress` NetworkPolicy only lets previews reach public addresses, so on a cluster that enforces NetworkPolicies and serves the API on a private address, CloudNativePG clusters in previews never become ready. Allow their pods to reach the API server with another NetworkPolicy. Find its addresses and port with:
+CloudNativePG's pods talk to the Kubernetes API server, which the default `restrict-egress` NetworkPolicy blocks when it's on a private address. The default PreviewPolicy's `allow-cnpg-api-server` NetworkPolicy lets them reach any address on TCP ports 443 and 6443, where API servers usually listen. If yours listens on another port, change that policy's ports. Find the port with:
 
 ```sh
 kubectl get endpointslices --namespace default --selector kubernetes.io/service-name=kubernetes
-```
-
-Lists in values replace the chart's, so set both the chart's policy and the new one, with the API server's address and port:
-
-```yaml
-defaultPolicy:
-  networkPolicies:
-    - metadata:
-        name: restrict-egress
-      spec:
-        podSelector: {}
-        policyTypes: [Egress]
-        egress:
-          - to:
-              - podSelector: {}
-          - to:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: kube-system
-                podSelector:
-                  matchLabels:
-                    k8s-app: kube-dns
-          - to:
-              - ipBlock:
-                  cidr: 0.0.0.0/0
-                  except:
-                    - 10.0.0.0/8
-                    - 172.16.0.0/12
-                    - 192.168.0.0/16
-                    - 100.64.0.0/10
-                    - 169.254.0.0/16
-              - ipBlock:
-                  cidr: ::/0
-                  except:
-                    - fc00::/7
-                    - fe80::/10
-    - metadata:
-        name: allow-cnpg-api-server
-      spec:
-        podSelector:
-          matchExpressions:
-            - key: cnpg.io/cluster
-              operator: Exists
-        policyTypes: [Egress]
-        egress:
-          - to:
-              - ipBlock:
-                  cidr: 172.18.0.2/32
-            ports:
-              - protocol: TCP
-                port: 6443
 ```
