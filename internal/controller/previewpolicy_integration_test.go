@@ -25,6 +25,7 @@ func waitForPolicy(t *testing.T, name string, status metav1.ConditionStatus, rea
 			return err
 		}
 		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
+		stalled := apimeta.FindStatusCondition(p.Status.Conditions, meta.StalledCondition)
 		switch {
 		case p.Status.ObservedGeneration != p.Generation:
 			return fmt.Errorf("PreviewPolicy %s isn't reconciled yet", name)
@@ -32,6 +33,10 @@ func waitForPolicy(t *testing.T, name string, status metav1.ConditionStatus, rea
 			return fmt.Errorf("PreviewPolicy %s has no Ready condition", name)
 		case c.Status != status || c.Reason != reason:
 			return fmt.Errorf("PreviewPolicy %s is Ready %s (%s), want %s (%s)", name, c.Status, c.Reason, status, reason)
+		case status == metav1.ConditionTrue && stalled != nil:
+			return fmt.Errorf("PreviewPolicy %s is ready but still Stalled (%s)", name, stalled.Reason)
+		case status == metav1.ConditionFalse && (stalled == nil || stalled.Status != metav1.ConditionTrue || stalled.Reason != reason):
+			return fmt.Errorf("PreviewPolicy %s isn't Stalled for %s", name, reason)
 		}
 		return nil
 	})
