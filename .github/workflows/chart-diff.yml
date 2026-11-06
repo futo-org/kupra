@@ -34,14 +34,12 @@ jobs:
       - name: Diff the rendered chart
         run: mise run chart:diff >"$RUNNER_TEMP/chart.diff"
 
-      - name: Comment the diff
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+      - name: Write the comment
+        id: comment
         run: |
-          marker='<!-- chart-diff -->'
+          delimiter="EOF-$(openssl rand -hex 8)"
           {
-            echo "$marker"
+            echo "body<<$delimiter"
             echo '## Rendered chart'
             echo
             if [ -s "$RUNNER_TEMP/chart.diff" ]; then
@@ -61,12 +59,11 @@ jobs:
             else
               echo 'No changes.'
             fi
-          } >"$RUNNER_TEMP/comment.md"
+            echo "$delimiter"
+          } >>"$GITHUB_OUTPUT"
 
-          comment=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
-          if [ -n "$comment" ]; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment" -F body=@"$RUNNER_TEMP/comment.md" >/dev/null
-          else
-            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
-          fi
+      - name: Comment the diff
+        uses: immich-app/devtools/actions/sticky-comment@0135acd12ad9f3369b94a2aa3c0ae8c835a4e926 # sticky-comment-action-v1.0.0
+        with:
+          id: chart-diff
+          body: ${{ steps.comment.outputs.body }}
