@@ -1,6 +1,7 @@
 package state
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -220,20 +221,7 @@ status: {snapshotHandle: handle-2, readyToUse: true}
 		Names:    names.ForResource("pr-1", "uid", claimGK, "data"),
 		Labels:   map[string]string{"kupra.futo.tech/preview-uid": "uid"},
 	}
-	var resp Response
-	for range 4 {
-		resp = kind.Restore(req)
-		if resp.Failed != "" {
-			t.Fatal(resp.Failed)
-		}
-		if resp.Done {
-			break
-		}
-		req.Observed = c.step(resp)
-	}
-	if !resp.Done {
-		t.Fatal("restore isn't done")
-	}
+	resp := restore(t, kind, &req, c)
 	c.step(resp)
 
 	restored := c.find("VolumeSnapshot", "preview")
@@ -326,4 +314,73 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 	if got := c[contentRef].GetLabels()["kupra.futo.tech/snapshot-uid"]; got != "uid" {
 		t.Errorf("source content's label = %q, want it labelled even though it was already retained", got)
 	}
+}
+
+// restore calls a kind's Restore until it's done, interleaved with fresh reconciliations, playing the snapshot controller, which binds the restore copies a call applies before the next call: it marks them ready, and records their VolumeSnapshot's UID in their content. It fails the test if the kind is done before the copies it applied are bound, or if it applies a copy again and drops that UID.
+func restore(t *testing.T, kind Kind, req *RestoreRequest, c cluster) Response {
+	t.Helper()
+	var copies []Ref
+	for range 8 {
+		// Each reconciliation starts with nothing read, and reads the copies only after what they're copied from. Whatever a kind applies before it has read its copies happens again on every reconciliation.
+		fresh := *req
+		fresh.Observed = Observed{}
+		for ref, obj := range req.Observed {
+			if !slices.Contains(copies, ref) {
+				fresh.Observed[ref] = obj
+			}
+		}
+		c.step(Response{Apply: kind.Restore(fresh).Apply})
+
+		resp := kind.Restore(*req)
+		if resp.Failed != "" {
+			t.Fatal(resp.Failed)
+		}
+		var applied []Ref
+		for _, obj := range resp.Apply {
+			if obj.GetKind() == volumeSnapshotGVK.Kind {
+				applied = append(applied, RefOf(obj))
+			}
+		}
+		if resp.Done {
+			for _, ref := range applied {
+				if c[ref] == nil {
+					t.Errorf("restore is done before its copy %s exists", ref.Name)
+				}
+			}
+			c.step(resp)
+			for _, ref := range copies {
+				if ready, _, _ := unstructured.NestedBool(c[ref].Object, "status", "readyToUse"); !ready {
+					t.Errorf("restore is done before its copy %s is bound", ref.Name)
+				}
+				if uid, _, _ := unstructured.NestedString(c[contentOf(t, c, ref)].Object, "spec", "volumeSnapshotRef", "uid"); uid == "" {
+					t.Errorf("restore applied its copy %s again, dropping the UID its content was bound with", ref.Name)
+				}
+			}
+			return resp
+		}
+		if resp.Resource != nil {
+			t.Errorf("restore returned %s before it's done", resp.Resource.GetName())
+		}
+		c.step(resp)
+		for _, ref := range applied {
+			_ = unstructured.SetNestedField(c[ref].Object, true, "status", "readyToUse")
+			_ = unstructured.SetNestedField(c[contentOf(t, c, ref)].Object, "uid-"+ref.Name, "spec", "volumeSnapshotRef", "uid")
+			if !slices.Contains(copies, ref) {
+				copies = append(copies, ref)
+			}
+		}
+		req.Observed = c.step(Response{Observe: resp.Observe})
+	}
+	t.Fatal("restore isn't done")
+	return Response{}
+}
+
+// contentOf returns the content a restore copy is bound to.
+func contentOf(t *testing.T, c cluster, ref Ref) Ref {
+	t.Helper()
+	name, _, _ := unstructured.NestedString(c[ref].Object, "spec", "source", "volumeSnapshotContentName")
+	if c[Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: name}] == nil {
+		t.Fatalf("copy %s has no content %q", ref.Name, name)
+	}
+	return Ref{GroupVersionKind: volumeSnapshotContentGVK, Name: name}
 }

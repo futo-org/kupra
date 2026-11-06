@@ -493,6 +493,8 @@ type restorePlan struct {
 	resources []*unstructured.Unstructured
 	// done is set when every state resource can be applied.
 	done bool
+	// waiting says what the resources that can't be applied yet are waiting for, where their kinds say.
+	waiting []string
 	// summary says how the state started, on a preview's first start after creation or reset.
 	summary      string
 	fromSnapshot bool
@@ -535,7 +537,7 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		}
 	}
 
-	var empty []string
+	var empty, waiting []string
 	for _, obj := range states {
 		gk := obj.GroupVersionKind().GroupKind()
 		kind, _ := state.For(gk)
@@ -572,12 +574,15 @@ func (r *PreviewReconciler) restoreState(ctx context.Context, p *kuprav1alpha1.P
 		}
 		if !resp.Done {
 			done = false
+			if resp.Waiting != "" {
+				waiting = append(waiting, obj.GetKind()+" "+obj.GetName()+": "+resp.Waiting)
+			}
 			continue
 		}
 		resources = append(resources, resp.Resource)
 	}
 
-	plan = &restorePlan{resources: resources, done: done}
+	plan = &restorePlan{resources: resources, done: done, waiting: waiting}
 	if restoring && done {
 		plan.fromSnapshot = snapshot != nil
 		message := "started empty"

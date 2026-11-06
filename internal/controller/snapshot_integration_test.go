@@ -873,3 +873,107 @@ func TestClaimAfterRemoval(t *testing.T) {
 		t.Errorf("annotations = %v, want the removed reset request to stay removed", got.Annotations)
 	}
 }
+
+// A claim waits for its restore copy to be bound, and its preview says what the copy is waiting for.
+func TestRestoreWaitsForCopy(t *testing.T) {
+	ctx := context.Background()
+	setUpPolicies(t)
+	createNamespace(t, "copies", nil)
+	createApp(t, "copies", "app", `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+`)
+	captured := &snapshotv1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "captured", Namespace: "copies"},
+		Spec:       snapshotv1.VolumeSnapshotSpec{Source: snapshotv1.VolumeSnapshotSource{PersistentVolumeClaimName: ptr("data")}},
+	}
+	if err := k8s.Create(ctx, captured); err != nil {
+		t.Fatal(err)
+	}
+	takeSnapshot(t, captured, "handle-copies")
+	snap := &kuprav1alpha1.PreviewSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "copies"},
+		Spec:       kuprav1alpha1.PreviewSnapshotSpec{Source: kuprav1alpha1.SnapshotSource{PreviewRef: meta.LocalObjectReference{Name: "gone"}}},
+	}
+	if err := k8s.Create(ctx, snap); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.Now()
+	group := snapshotv1.GroupName
+	eventually(t, func() error {
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
+			return err
+		}
+		snap.Status = kuprav1alpha1.PreviewSnapshotStatus{
+			StartTime: &now, CompletionTime: &now, Phase: kuprav1alpha1.PreviewSnapshotSucceeded, ReadyToUse: true,
+			AppRef:   &meta.LocalObjectReference{Name: "app"},
+			Captures: []kuprav1alpha1.Capture{{Kind: "PersistentVolumeClaim", Name: "data", Data: []corev1.TypedLocalObjectReference{{APIGroup: &group, Kind: "VolumeSnapshot", Name: "captured"}}}},
+		}
+		return k8s.Status().Update(ctx, snap)
+	})
+
+	holdRestoreCopies.Store(true)
+	t.Cleanup(func() { holdRestoreCopies.Store(false) })
+	restored := &kuprav1alpha1.Preview{
+		ObjectMeta: metav1.ObjectMeta{Name: "restored", Namespace: "copies"},
+		Spec: kuprav1alpha1.PreviewSpec{
+			AppRef:      meta.LocalObjectReference{Name: "app"},
+			RestoreFrom: &kuprav1alpha1.RestoreSource{SnapshotRef: &meta.LocalObjectReference{Name: "base"}},
+		},
+	}
+	if err := k8s.Create(ctx, restored); err != nil {
+		t.Fatal(err)
+	}
+	ns := waitForNamespace(t, "copies", "restored")
+	p := getPreview(t, "copies", "restored")
+	copied := waitForVolumeSnapshot(t, ns, controller.LabelPreviewUID, string(p.UID))
+	copied.Status = &snapshotv1.VolumeSnapshotStatus{Error: &snapshotv1.VolumeSnapshotError{Message: ptr("no snapshot class")}}
+	if err := k8s.Status().Update(ctx, copied); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() error {
+		c := apimeta.FindStatusCondition(getPreview(t, "copies", "restored").Status.Conditions, meta.ReadyCondition)
+		if c == nil || !strings.Contains(c.Message, "no snapshot class") {
+			return fmt.Errorf("Ready = %+v, want it to say what the copy is waiting for", c)
+		}
+		return nil
+	})
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: "data"}, &corev1.PersistentVolumeClaim{}); !apierrors.IsNotFound(err) {
+		t.Errorf("claim: %v, want it created only once its copy is bound", err)
+	}
+
+	// The snapshot controller binds the copy, recording its UID in its content.
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(copied), copied); err != nil {
+		t.Fatal(err)
+	}
+	var content snapshotv1.VolumeSnapshotContent
+	if err := k8s.Get(ctx, client.ObjectKey{Name: *copied.Spec.Source.VolumeSnapshotContentName}, &content); err != nil {
+		t.Fatal(err)
+	}
+	content.Spec.VolumeSnapshotRef.UID = copied.UID
+	if err := k8s.Update(ctx, &content); err != nil {
+		t.Fatal(err)
+	}
+	bindSnapshot(t, copied, content.Name)
+	eventually(t, func() error {
+		return k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: "data"}, &corev1.PersistentVolumeClaim{})
+	})
+
+	// The provisioner refuses a copy whose content names another snapshot, so later reconciliations leave the binding alone.
+	time.Sleep(3 * time.Second)
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(&content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.Spec.VolumeSnapshotRef.UID != copied.UID {
+		t.Errorf("copy's content is bound to UID %q, want %q", content.Spec.VolumeSnapshotRef.UID, copied.UID)
+	}
+}

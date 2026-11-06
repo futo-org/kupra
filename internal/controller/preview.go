@@ -285,9 +285,14 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	if err == nil && !plan.done {
 		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
-		provisioning(p, "restoring state")
-		stallAfterTimeout(p, &app, "restoring state")
-		return ctrl.Result{RequeueAfter: startingInterval}, nil
+		message := "restoring state"
+		if len(plan.waiting) > 0 {
+			message += ": " + strings.Join(plan.waiting, "; ")
+		}
+		provisioning(p, message)
+		stallAfterTimeout(p, &app, message)
+		// Restore copies are bound within moments, and kupra doesn't watch them.
+		return ctrl.Result{RequeueAfter: nextStepInterval}, nil
 	}
 	if err == nil {
 		var ready bool

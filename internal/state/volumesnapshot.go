@@ -2,6 +2,9 @@ package state
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -149,4 +152,55 @@ func snapshotRef(name string) corev1.TypedLocalObjectReference {
 // isSnapshot reports whether a capture's data is a VolumeSnapshot.
 func isSnapshot(ref corev1.TypedLocalObjectReference) bool {
 	return ref.Kind == volumeSnapshotGVK.Kind && ref.APIGroup != nil && *ref.APIGroup == volumeSnapshotGVK.Group
+}
+
+// allReady reports whether the VolumeSnapshots at refs all exist, whether they're all ready to use, and if not, what they're waiting for.
+func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed string) {
+	var messages []string
+	ready = true
+	for _, ref := range refs {
+		obj := observed[ref]
+		if obj == nil {
+			return false, false, "", ""
+		}
+		r, w, failed := readyToUse(obj)
+		if failed != "" {
+			return false, false, "", failed
+		}
+		ready = ready && r
+		if w != "" {
+			messages = append(messages, w)
+		}
+	}
+	slices.Sort(messages)
+	return true, ready, strings.Join(messages, "; "), ""
+}
+
+// restoreCopies returns the restore copies read and found missing, to apply, and whether all of them are ready to use, or what they're waiting for. A copy that exists isn't applied again: its content's volumeSnapshotRef is replaced as a whole, which would drop the UID the snapshot controller bound it with.
+func restoreCopies(copies map[Ref][]*unstructured.Unstructured, observed Observed) (apply []*unstructured.Unstructured, observe []Ref, ready bool, waiting, failed string) {
+	var messages []string
+	ready = true
+	for _, ref := range slices.SortedFunc(maps.Keys(copies), func(a, b Ref) int { return strings.Compare(a.Name, b.Name) }) {
+		observe = append(observe, ref)
+		obj, seen := observed[ref]
+		if !seen {
+			// Each reconciliation starts with nothing read, so a copy is only known to be missing once it's been read.
+			ready = false
+			continue
+		}
+		if obj == nil {
+			apply = append(apply, copies[ref]...)
+			ready = false
+			continue
+		}
+		r, w, f := readyToUse(obj)
+		if f != "" {
+			return nil, nil, false, "", f
+		}
+		ready = ready && r
+		if w != "" {
+			messages = append(messages, w)
+		}
+	}
+	return apply, observe, ready, strings.Join(messages, "; "), ""
 }

@@ -62,7 +62,16 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 	if err := atLeast(claim, bound.snapshot.Status.RestoreSize, "spec", "resources", "requests", "storage"); err != nil {
 		return Response{Failed: err.Error()}
 	}
-	return Response{Resource: claim, Apply: copied, Done: true}
+	// The provisioner's first attempt fails on a copy that isn't bound yet, so the claim waits for it.
+	copyRef := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: namespace, Name: name}
+	apply, observeCopies, ready, waiting, failed := restoreCopies(map[Ref][]*unstructured.Unstructured{copyRef: copied}, req.Observed)
+	if failed != "" {
+		return Response{Failed: failed}
+	}
+	if !ready {
+		return Response{Apply: apply, Observe: append(observe, observeCopies...), Waiting: waiting}
+	}
+	return Response{Resource: claim, Done: true}
 }
 
 // Ready is true once the claim exists, since storage that binds on first use doesn't bind before pods start.
