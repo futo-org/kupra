@@ -80,8 +80,11 @@ template:
 				return err
 			}
 			c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition)
-			if c == nil || c.ObservedGeneration != app.Generation || c.Status != status || c.Reason != reason {
+			switch {
+			case c == nil || c.Status != status || c.Reason != reason:
 				return fmt.Errorf("PreviewApp is Ready %s, want %s (%s)", testutil.Condition(c), status, reason)
+			case c.ObservedGeneration != app.Generation:
+				return fmt.Errorf("PreviewApp's Ready condition is for generation %d, want %d", c.ObservedGeneration, app.Generation)
 			}
 			return nil
 		})

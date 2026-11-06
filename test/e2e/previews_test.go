@@ -107,7 +107,10 @@ func TestPreviewLifecycle(t *testing.T) {
 				return err
 			}
 			ready := apimeta.FindStatusCondition(preview.Status.Conditions, meta.ReadyCondition)
-			if preview.Status.ObservedGeneration != preview.Generation || preview.Status.Phase != kuprav1alpha1.PreviewRunning {
+			switch {
+			case preview.Status.ObservedGeneration != preview.Generation:
+				return fmt.Errorf("Preview's status is for generation %d, want %d", preview.Status.ObservedGeneration, preview.Generation)
+			case preview.Status.Phase != kuprav1alpha1.PreviewRunning:
 				return fmt.Errorf("Preview is %s, Ready %s", preview.Status.Phase, testutil.Condition(ready))
 			}
 			var d appsv1.Deployment

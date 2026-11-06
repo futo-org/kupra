@@ -81,7 +81,10 @@ func waitForRunning(t *testing.T, namespace, name string) *kuprav1alpha1.Preview
 		if err := k8s.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
 			return err
 		}
-		if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != kuprav1alpha1.PreviewRunning {
+		switch {
+		case p.Status.ObservedGeneration != p.Generation:
+			return fmt.Errorf("Preview %s's status is for generation %d, want %d", name, p.Status.ObservedGeneration, p.Generation)
+		case p.Status.Phase != kuprav1alpha1.PreviewRunning:
 			return fmt.Errorf("Preview %s is %s, Ready %s", name, p.Status.Phase, testutil.Condition(apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)))
 		}
 		return nil

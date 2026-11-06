@@ -36,7 +36,10 @@ func TestAPIServerEgress(t *testing.T) {
 	if want := []string{"172.18.0.2/32", "172.18.0.3/32", "fd00::2/128"}; len(cidrs) != len(want) || cidrs[0] != want[0] || cidrs[1] != want[1] || cidrs[2] != want[2] {
 		t.Errorf("destinations = %v, want %v", cidrs, want)
 	}
-	if len(rule.Ports) != 1 || rule.Ports[0].Port.IntValue() != 6443 || *rule.Ports[0].Protocol != tcp {
-		t.Errorf("rule has %d ports, want TCP 6443 once", len(rule.Ports))
+	if len(rule.Ports) != 1 {
+		t.Fatalf("rule has %d ports, want TCP 6443 once", len(rule.Ports))
+	}
+	if port := rule.Ports[0]; port.Port.IntValue() != 6443 || *port.Protocol != tcp {
+		t.Errorf("rule allows %s %d, want TCP 6443", *port.Protocol, port.Port.IntValue())
 	}
 }

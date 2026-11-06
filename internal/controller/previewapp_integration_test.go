@@ -54,8 +54,11 @@ func waitForReady(t *testing.T, app *kuprav1alpha1.PreviewApp, status metav1.Con
 			return err
 		}
 		c := apimeta.FindStatusCondition(got.Status.Conditions, meta.ReadyCondition)
-		if c == nil || c.ObservedGeneration != got.Generation || c.Status != status || c.Reason != reason {
+		switch {
+		case c == nil || c.Status != status || c.Reason != reason:
 			return fmt.Errorf("PreviewApp %s is Ready %s, want %s (%s)", app.Name, testutil.Condition(c), status, reason)
+		case c.ObservedGeneration != got.Generation:
+			return fmt.Errorf("PreviewApp %s's Ready condition is for generation %d, want %d", app.Name, c.ObservedGeneration, got.Generation)
 		}
 		for _, m := range messages {
 			if !strings.Contains(c.Message, m) {

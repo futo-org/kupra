@@ -42,7 +42,10 @@ func waitForPhase(t *testing.T, namespace, name string, phase kuprav1alpha1.Prev
 			return err
 		}
 		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
-		if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != phase || c == nil || c.Reason != reason {
+		switch {
+		case p.Status.ObservedGeneration != p.Generation:
+			return fmt.Errorf("Preview %s's status is for generation %d, want %d", name, p.Status.ObservedGeneration, p.Generation)
+		case p.Status.Phase != phase || c == nil || c.Reason != reason:
 			return fmt.Errorf("Preview %s is %s, Ready %s; want %s (%s)", name, p.Status.Phase, testutil.Condition(c), phase, reason)
 		}
 		return nil
