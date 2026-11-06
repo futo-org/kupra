@@ -274,20 +274,21 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 	for _, v := range a.variables {
 		out, _, err := v.Eval(activation)
 		if err != nil {
-			return nil, fmt.Errorf("spec.variables[%s]: %w", v.name, err)
+			return nil, field.Invalid(field.NewPath("spec", "variables").Key(v.name).Child("expression"), v.source, err.Error())
 		}
 		activation["variables."+v.name] = out
 	}
 
 	result := &Result{}
 	for _, l := range a.links {
+		urlPath := field.NewPath("spec", "links").Key(l.name).Child("urlExpr")
 		out, _, err := l.Eval(activation)
 		if err != nil {
-			return nil, fmt.Errorf("spec.links[%s]: %w", l.name, err)
+			return nil, field.Invalid(urlPath, l.source, err.Error())
 		}
 		url, ok := out.(types.String)
 		if !ok {
-			return nil, fmt.Errorf("spec.links[%s]: must evaluate to string, not %s", l.name, out.Type().TypeName())
+			return nil, field.Invalid(urlPath, l.source, fmt.Sprintf("must evaluate to string, not %s", out.Type().TypeName()))
 		}
 		result.Links = append(result.Links, kuprav1alpha1.LinkStatus{Name: l.name, URL: string(url)})
 	}
@@ -314,17 +315,17 @@ func (a *App) Render(preview Preview, values map[string]string) (*Result, error)
 		// Settings are decided before rendering a resource, so they can't come from metadata.annotationsExpr.
 		for _, key := range settingAnnotations {
 			if _, ok := u.GetAnnotations()[key]; ok && r.settings[key] == nil {
-				return nil, fmt.Errorf("%s: %s may not be set by an expression", r.path.Child("metadata", "annotationsExpr"), key)
+				return nil, field.Forbidden(r.path.Child("metadata", "annotationsExpr").Key(key), "may not be set by an expression")
 			}
 		}
 		if u.GetName() == "" {
-			return nil, fmt.Errorf("%s: name is required", r.path.Child("metadata", "name"))
+			return nil, field.Required(r.path.Child("metadata", "name"), "")
 		}
 		u.SetNamespace(preview.Namespace)
 
 		key := schema.FromAPIVersionAndKind(u.GetAPIVersion(), u.GetKind()).GroupKind().String() + "/" + u.GetName()
 		if seen[key] {
-			return nil, fmt.Errorf("%s: more than one %s named %s", r.path, u.GetKind(), u.GetName())
+			return nil, field.Duplicate(r.path, u.GetKind()+" "+u.GetName())
 		}
 		seen[key] = true
 		result.Objects = append(result.Objects, Object{Unstructured: u, NotState: !isState})
@@ -341,11 +342,11 @@ func (r *resource) setting(key string, activation map[string]any) (bool, error) 
 	fldPath := r.path.Child("metadata", "annotations").Key(key)
 	out, _, err := prg.Eval(activation)
 	if err != nil {
-		return false, fmt.Errorf("%s: %w", fldPath, err)
+		return false, field.Invalid(fldPath, prg.source, err.Error())
 	}
 	v, ok := out.(types.Bool)
 	if !ok {
-		return false, fmt.Errorf("%s: must evaluate to bool, not %s", fldPath, out.Type().TypeName())
+		return false, field.Invalid(fldPath, prg.source, fmt.Sprintf("must evaluate to bool, not %s", out.Type().TypeName()))
 	}
 	return bool(v), nil
 }
@@ -365,11 +366,11 @@ func evalFields(value any, fldPath *field.Path, target []any, exprs map[string]*
 			}
 			out, _, err := prg.Eval(activation)
 			if err != nil {
-				return fmt.Errorf("%s: %w", keyPath, err)
+				return field.Invalid(keyPath, prg.source, err.Error())
 			}
 			v, err := native(out)
 			if err != nil {
-				return fmt.Errorf("%s: %w", keyPath, err)
+				return field.Invalid(keyPath, prg.source, err.Error())
 			}
 			delete(value, key)
 			value[strings.TrimSuffix(key, exprSuffix)] = v

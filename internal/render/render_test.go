@@ -411,7 +411,7 @@ template:
 		{name: "unknown parameter", values: `{tag: a, colour: red}`, want: "spec.parameters[colour]: Not found"},
 		{name: "wrong type", values: `{tag: a, replicas: two}`, want: `spec.parameters[replicas]: Invalid value: "two": must be an integer`},
 		{name: "not in the enum", values: `{tag: a, level: verbose}`, want: "spec.parameters[level]: Unsupported value: \"verbose\""},
-		{name: "duplicate resources", values: `{tag: config}`, want: "more than one ConfigMap named config"},
+		{name: "duplicate resources", values: `{tag: config}`, want: `spec.template.resources[1]: Duplicate value: "ConfigMap config"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := app.Render(preview, values(t, tc.values))
@@ -549,7 +549,7 @@ template:
         name: cache
         annotationsExpr: '{"kupra.futo.tech/state": "false"}'
 `, `{}`)
-		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/state may not be set by an expression") {
+		if err == nil || !strings.Contains(err.Error(), "annotationsExpr[kupra.futo.tech/state]: Forbidden: may not be set by an expression") {
 			t.Errorf("error = %v, want the state annotation refused", err)
 		}
 	})
@@ -600,7 +600,7 @@ template:
         name: config
         annotationsExpr: '{"kupra.futo.tech/include": "false"}'
 `, `{}`)
-		if err == nil || !strings.Contains(err.Error(), "kupra.futo.tech/include may not be set by an expression") {
+		if err == nil || !strings.Contains(err.Error(), "annotationsExpr[kupra.futo.tech/include]: Forbidden: may not be set by an expression") {
 			t.Errorf("error = %v, want it to say the include can't come from an expression", err)
 		}
 	})
@@ -689,7 +689,7 @@ links:
 template:
   resources: []
 `, `{}`)
-		if err == nil || !strings.Contains(err.Error(), "spec.links[Web]: must evaluate to string, not int") {
+		if err == nil || !strings.Contains(err.Error(), `spec.links[Web].urlExpr: Invalid value: "dyn(1)": must evaluate to string, not int`) {
 			t.Errorf("error = %v, want it to say the link must be a string", err)
 		}
 	})
