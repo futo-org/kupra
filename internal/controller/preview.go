@@ -658,8 +658,9 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 
 	p.Status.ObservedGeneration = p.Generation
 	p.Status.Phase = kuprav1alpha1.PreviewTerminating
-	conditions.MarkFalse(p, meta.ReadyCondition, ReasonTerminating, "")
-	markReconciling(p, ReasonTerminating, fmt.Sprintf("deleting namespace %s", nsName))
+	message := fmt.Sprintf("deleting namespace %s", nsName)
+	conditions.MarkFalse(p, meta.ReadyCondition, ReasonTerminating, "%s", message)
+	markReconciling(p, ReasonTerminating, message)
 	conditions.Delete(p, meta.StalledCondition)
 
 	// Read live: the cache may not have seen a namespace created just before the preview was deleted.

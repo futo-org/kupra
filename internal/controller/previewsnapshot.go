@@ -107,6 +107,8 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 		patch := client.MergeFrom(s.DeepCopy())
 		s.Status.Phase = kuprav1alpha1.PreviewSnapshotDeleting
 		message := "in use by " + strings.Join(holders, ", ")
+		// A snapshot being deleted can't be restored from, though its capture is kept until nothing holds it.
+		conditions.MarkFalse(s, meta.ReadyCondition, ReasonInUse, "%s", message)
 		conditions.MarkTrue(s, meta.ReconcilingCondition, ReasonInUse, "%s", message)
 		if err := r.Status().Patch(ctx, s, patch); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)

@@ -104,8 +104,9 @@ func (r *PreviewReconciler) startCapture(ctx context.Context, p *kuprav1alpha1.P
 	// The app that rendered the running preview, which a capture holds back changes to.
 	s.Status.Parameters = render.WithDefaults(app.Spec.Parameters, p.Spec.Parameters)
 	s.Status.Phase = kuprav1alpha1.PreviewSnapshotInProgress
-	conditions.MarkFalse(s, meta.ReadyCondition, ReasonCapturing, "")
-	conditions.MarkTrue(s, meta.ReconcilingCondition, ReasonCapturing, "%s", fmt.Sprintf("capturing Preview %s", p.Name))
+	message := fmt.Sprintf("capturing Preview %s", p.Name)
+	conditions.MarkFalse(s, meta.ReadyCondition, ReasonCapturing, "%s", message)
+	conditions.MarkTrue(s, meta.ReconcilingCondition, ReasonCapturing, "%s", message)
 	return true, client.IgnoreNotFound(r.Status().Patch(ctx, s, patch))
 }
 
@@ -286,7 +287,7 @@ func (r *PreviewReconciler) reconcileReset(ctx context.Context, p *kuprav1alpha1
 		stopping(p, ReasonResetting, "removing app and state")
 		return ctrl.Result{RequeueAfter: startingInterval}, nil
 	}
-	provisioning(p, "reset")
+	provisioning(p, "restoring state after reset")
 	return ctrl.Result{RequeueAfter: nextStepInterval}, nil
 }
 
