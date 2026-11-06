@@ -34,6 +34,7 @@ func create(t *testing.T, obj client.Object) {
 
 // TestCustomTemplateRole checks that kupra only binds a custom template role once an admin allows it.
 func TestCustomTemplateRole(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	suffix := rand.String(5)
 
