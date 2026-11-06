@@ -19,6 +19,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/controller"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 func getCluster(t *testing.T, namespace, name string) *unstructured.Unstructured {
@@ -185,7 +186,7 @@ template:
 		}
 		s := waitForSnapshotPhase(t, "cnpg", "base", kuprav1alpha1.PreviewSnapshotSucceeded)
 		if len(s.Status.Captures) != 1 || s.Status.Captures[0].Kind != "Cluster" || len(s.Status.Captures[0].Data) != 2 {
-			t.Errorf("PreviewSnapshot has %d captures, want one of the cluster, with its two VolumeSnapshots", len(s.Status.Captures))
+			t.Errorf("PreviewSnapshot captured %s, want the cluster, in two VolumeSnapshots", testutil.Captures(s.Status.Captures))
 		}
 		eventually(t, func() error {
 			if err := k8s.Get(ctx, client.ObjectKeyFromObject(backup), backup); !apierrors.IsNotFound(err) {

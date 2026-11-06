@@ -178,7 +178,7 @@ template:
 		t.Fatal(err)
 	}
 	if binding.RoleRef.Name != "kupra-preview-template-base" || len(binding.Subjects) != 1 || binding.Subjects[0].Namespace != kupraNamespace || binding.Subjects[0].Name != nsName {
-		t.Errorf("template binding binds ClusterRole %s to %d subjects, want kupra-preview-template-base to ServiceAccount %s/%s", binding.RoleRef.Name, len(binding.Subjects), kupraNamespace, nsName)
+		t.Errorf("template binding binds ClusterRole %s to %s, want kupra-preview-template-base to ServiceAccount %s/%s", binding.RoleRef.Name, testutil.Subjects(binding.Subjects), kupraNamespace, nsName)
 	}
 	var account corev1.ServiceAccount
 	if err := k8s.Get(ctx, client.ObjectKey{Namespace: kupraNamespace, Name: nsName}, &account); err != nil {

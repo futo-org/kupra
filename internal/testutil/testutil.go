@@ -67,3 +67,51 @@ func DataSource(ref *corev1.TypedObjectReference) string {
 	}
 	return ref.Kind + " " + ref.Name
 }
+
+// Refs describes object references for a test's failure message, in order.
+func Refs(refs []corev1.TypedLocalObjectReference) string {
+	if len(refs) == 0 {
+		return "none"
+	}
+	var parts []string
+	for _, r := range refs {
+		parts = append(parts, r.Kind+" "+r.Name)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Captures describes a PreviewSnapshot's captures for a test's failure message.
+func Captures(captures []kuprav1alpha1.Capture) string {
+	if len(captures) == 0 {
+		return "none"
+	}
+	var parts []string
+	for _, c := range captures {
+		parts = append(parts, c.Kind+" "+c.Name+" in "+Refs(c.Data))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// Owners describes owner references for a test's failure message.
+func Owners(owners []metav1.OwnerReference) string {
+	if len(owners) == 0 {
+		return "none"
+	}
+	var parts []string
+	for _, o := range owners {
+		parts = append(parts, o.Kind+" "+o.Name)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Subjects describes RBAC subjects for a test's failure message.
+func Subjects(subjects []rbacv1.Subject) string {
+	if len(subjects) == 0 {
+		return "none"
+	}
+	var parts []string
+	for _, s := range subjects {
+		parts = append(parts, Subject(s))
+	}
+	return strings.Join(parts, ", ")
+}

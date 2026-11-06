@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/futo-org/kupra/internal/names"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 func object(t *testing.T, doc string) *unstructured.Unstructured {
@@ -171,7 +172,7 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 		t.Error("the source VolumeSnapshot is left in the preview's namespace")
 	}
 	if len(resp.Capture.Data) != 1 || resp.Capture.Data[0].Name != target.GetName() || resp.Capture.Data[0].Kind != "VolumeSnapshot" {
-		t.Errorf("capture holds %d objects, want only the moved VolumeSnapshot", len(resp.Capture.Data))
+		t.Errorf("capture is in %s, want only the moved VolumeSnapshot %s", testutil.Refs(resp.Capture.Data), target.GetName())
 	}
 }
 

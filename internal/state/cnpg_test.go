@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/futo-org/kupra/internal/names"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 var clusterGK = schema.GroupKind{Group: "postgresql.cnpg.io", Kind: "Cluster"}
@@ -205,7 +206,7 @@ func TestClusterCapture(t *testing.T) {
 		t.Error("the Backup is left in the preview's namespace")
 	}
 	if len(resp.Capture.Data) != 2 || resp.Capture.Data[0].Name != targets["PG_DATA"].GetName() || resp.Capture.Data[1].Name != targets["PG_WAL"].GetName() {
-		t.Errorf("capture holds %d objects, want the moved PG_DATA and PG_WAL VolumeSnapshots, in that order", len(resp.Capture.Data))
+		t.Errorf("capture is in %s, want the moved PG_DATA and PG_WAL VolumeSnapshots, in that order", testutil.Refs(resp.Capture.Data))
 	}
 }
 

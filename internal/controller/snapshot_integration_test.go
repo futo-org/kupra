@@ -185,13 +185,13 @@ template:
 			t.Errorf("source content's deletion policy = %s, want Retain", sourceContent.Spec.DeletionPolicy)
 		}
 		if owners := moved.OwnerReferences; len(owners) != 1 || owners[0].UID != snap.UID {
-			t.Errorf("moved VolumeSnapshot has %d owners, want only the PreviewSnapshot", len(owners))
+			t.Errorf("moved VolumeSnapshot is owned by %s, want only PreviewSnapshot %s", testutil.Owners(owners), snap.Name)
 		}
 		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
 
 		s := waitForSnapshotPhase(t, "snapshots", "base-1", kuprav1alpha1.PreviewSnapshotSucceeded)
 		if !s.Status.ReadyToUse || len(s.Status.Captures) != 1 || s.Status.Captures[0].Name != "data" || s.Status.Captures[0].Data[0].Name != moved.Name {
-			t.Errorf("PreviewSnapshot is ready %v, with %d captures; want a capture of data in %s", s.Status.ReadyToUse, len(s.Status.Captures), moved.Name)
+			t.Errorf("PreviewSnapshot is ready %v and captured %s; want PersistentVolumeClaim data in %s", s.Status.ReadyToUse, testutil.Captures(s.Status.Captures), moved.Name)
 		}
 		if s.Status.AppRef == nil || s.Status.AppRef.Name != "app" {
 			t.Errorf("snapshot appRef = %v, want app", s.Status.AppRef)

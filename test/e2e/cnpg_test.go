@@ -120,7 +120,7 @@ func TestClusterState(t *testing.T) {
 	}
 	waitForSnapshot(t, snap)
 	if len(snap.Status.Captures) != 1 || len(snap.Status.Captures[0].Data) != 2 {
-		t.Errorf("PreviewSnapshot has %d captures, want the cluster's, of its data and WAL", len(snap.Status.Captures))
+		t.Errorf("PreviewSnapshot captured %s, want the cluster, in its data and WAL", testutil.Captures(snap.Status.Captures))
 	}
 
 	// The capture outlives its source.
