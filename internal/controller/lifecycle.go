@@ -10,7 +10,6 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/conditions"
-	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -244,18 +243,27 @@ func (r *PreviewReconciler) claimResetRequest(ctx context.Context, p *kuprav1alp
 
 // ownsAnnotation reports whether a field manager owns an annotation through server-side apply.
 func ownsAnnotation(obj metav1.Object, manager, key string) bool {
+	for _, metadata := range appliedMetadata(obj, manager) {
+		if _, ok := metadata["f:annotations"]["f:"+key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// appliedMetadata returns the metadata fields a field manager has applied to an object, from its managedFields, one map per entry.
+func appliedMetadata(obj metav1.Object, manager string) []map[string]map[string]any {
+	var applied []map[string]map[string]any
 	for _, e := range obj.GetManagedFields() {
 		if e.Manager != manager || e.Operation != metav1.ManagedFieldsOperationApply || e.Subresource != "" || e.FieldsV1 == nil {
 			continue
 		}
 		var fields map[string]map[string]map[string]any
-		if json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields) == nil {
-			if _, ok := fields["f:metadata"]["f:annotations"]["f:"+key]; ok {
-				return true
-			}
+		if json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields) == nil && fields["f:metadata"] != nil {
+			applied = append(applied, fields["f:metadata"])
 		}
 	}
-	return false
+	return applied
 }
 
 // reconcileReset removes a preview's app, state and restore copies, then records the reset as handled.
@@ -296,26 +304,8 @@ func (r *PreviewReconciler) finishReset(ctx context.Context, p *kuprav1alpha1.Pr
 
 // removeRestoreCopies deletes the VolumeSnapshots and VolumeSnapshotContents a preview was restored from, and reports whether they're gone.
 func (r *PreviewReconciler) removeRestoreCopies(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
-	selector := client.MatchingLabels{LabelPreviewUID: string(p.UID)}
-	var snapshots snapshotv1.VolumeSnapshotList
-	if err := r.APIReader.List(ctx, &snapshots, client.InNamespace(namespace), selector); err != nil && !apimeta.IsNoMatchError(err) {
-		return false, err
-	}
-	var contents snapshotv1.VolumeSnapshotContentList
-	if err := r.APIReader.List(ctx, &contents, selector); err != nil && !apimeta.IsNoMatchError(err) {
-		return false, err
-	}
-	for i := range snapshots.Items {
-		if err := client.IgnoreNotFound(r.Delete(ctx, &snapshots.Items[i])); err != nil {
-			return false, err
-		}
-	}
-	for i := range contents.Items {
-		if err := client.IgnoreNotFound(r.Delete(ctx, &contents.Items[i])); err != nil {
-			return false, err
-		}
-	}
-	return len(snapshots.Items) == 0 && len(contents.Items) == 0, nil
+	found, err := deleteSnapshots(ctx, r.APIReader, r.Client, client.InNamespace(namespace), client.MatchingLabels{LabelPreviewUID: string(p.UID)})
+	return !found, err
 }
 
 // chooseSnapshot finds the PreviewSnapshot a preview restores from, or a reason there's none yet.
