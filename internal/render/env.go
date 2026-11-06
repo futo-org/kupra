@@ -83,6 +83,8 @@ func (e *env) addVariable(name string, t *cel.Type) error {
 type program struct {
 	cel.Program
 	outputType *cel.Type
+	// source is the expression, which errors show.
+	source string
 }
 
 func (e *env) compile(expression string, want *cel.Type) (*program, error) {
@@ -97,7 +99,7 @@ func (e *env) compile(expression string, want *cel.Type) (*program, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &program{Program: prg, outputType: ast.OutputType()}, nil
+	return &program{Program: prg, outputType: ast.OutputType(), source: expression}, nil
 }
 
 // native converts an expression's result into a value for an unstructured object, the way kro's conversion.GoNativeType does. Integers stay exact, and durations and timestamps become Kubernetes' usual strings.
