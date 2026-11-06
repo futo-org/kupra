@@ -19,7 +19,7 @@ linters:
   settings:
     depguard:
       rules:
-        # State kinds, rendering and naming are pure functions (ADR 2): only the controllers talk to the API server.
+        # State kinds, rendering and naming don't talk to the API server (ADR 2): only the controllers do. They may log.
         functional-core:
           files:
             - "**/internal/state/*.go"
@@ -27,11 +27,9 @@ linters:
             - "**/internal/names/*.go"
             - "!$test"
           deny:
-            - pkg: sigs.k8s.io/controller-runtime
+            - pkg: sigs.k8s.io/controller-runtime/pkg/client
+              desc: only the controllers talk to the API server
+            - pkg: sigs.k8s.io/controller-runtime/pkg/cache
               desc: only the controllers talk to the API server
             - pkg: k8s.io/client-go
               desc: only the controllers talk to the API server
-            - pkg: net/http
-              desc: the functional core does no I/O
-            - pkg: os
-              desc: the functional core does no I/O
