@@ -1,0 +1,71 @@
+name: Chart diff
+
+on:
+  pull_request:
+    paths:
+      - charts/**
+      - .github/workflows/chart-diff.yml
+      - .mise/tasks/chart/diff
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  diff:
+    name: Diff the rendered chart
+    runs-on: ubuntu-latest
+    # Pull requests from forks get a read-only token, which can't comment.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup mise
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+
+      - name: Diff the rendered chart
+        run: mise run chart:diff >"$RUNNER_TEMP/chart.diff"
+
+      - name: Comment the diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          marker='<!-- chart-diff -->'
+          {
+            echo "$marker"
+            echo '## Rendered chart'
+            echo
+            if [ -s "$RUNNER_TEMP/chart.diff" ]; then
+              echo '<details><summary>Manifest diff</summary>'
+              echo
+              echo '```diff'
+              # A comment holds up to 65536 characters.
+              head -c 60000 "$RUNNER_TEMP/chart.diff"
+              echo '```'
+              if [ "$(wc -c <"$RUNNER_TEMP/chart.diff")" -gt 60000 ]; then
+                echo
+                echo 'The diff is cut short. Run `mise run chart:diff` for all of it.'
+              fi
+              echo
+              echo '</details>'
+            else
+              echo 'No changes.'
+            fi
+          } >"$RUNNER_TEMP/comment.md"
+
+          comment=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
+          if [ -n "$comment" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment" -F body=@"$RUNNER_TEMP/comment.md" >/dev/null
+          else
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+          fi
