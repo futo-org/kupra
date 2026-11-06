@@ -103,6 +103,7 @@ func waitForSnapshot(t *testing.T, snap *kuprav1alpha1.PreviewSnapshot) {
 }
 
 func TestState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "e2e-state-"}}
 	if err := k8s.Create(ctx, ns); err != nil {

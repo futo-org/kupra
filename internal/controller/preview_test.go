@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/conditions"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -314,5 +315,54 @@ func TestOwnsAnnotation(t *testing.T) {
 				t.Errorf("ownsAnnotation = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// Waiting for something that happens by itself isn't stalling, and doesn't take a running preview down.
+func TestWaitingFor(t *testing.T) {
+	p := &kuprav1alpha1.Preview{}
+	running(p)
+	waitingFor(p, ReasonAppNotReady, "waiting for PreviewApp app to be checked")
+	if p.Status.Phase != kuprav1alpha1.PreviewRunning || !conditions.IsTrue(p, meta.ReadyCondition) {
+		t.Errorf("phase %s, Ready %v; want a running preview left running", p.Status.Phase, conditions.Get(p, meta.ReadyCondition))
+	}
+	if !conditions.IsTrue(p, meta.ReconcilingCondition) || conditions.Has(p, meta.StalledCondition) {
+		t.Errorf("conditions = %+v, want Reconciling and not Stalled", p.Status.Conditions)
+	}
+
+	// A new preview, and one that was blocked or had failed, is pending for the wait's reason, and no longer stalled.
+	for name, setUp := range map[string]func(*kuprav1alpha1.Preview){
+		"new":     func(*kuprav1alpha1.Preview) {},
+		"blocked": func(p *kuprav1alpha1.Preview) { pending(p, ReasonAppNotReady, "PreviewApp app failed its checks") },
+		"failed":  func(p *kuprav1alpha1.Preview) { failed(p, ReasonRenderFailed, "invalid template") },
+	} {
+		p := &kuprav1alpha1.Preview{}
+		setUp(p)
+		waitingFor(p, ReasonSnapshotNotReady, "PreviewSnapshot base is not ready")
+		ready := conditions.Get(p, meta.ReadyCondition)
+		if p.Status.Phase != kuprav1alpha1.PreviewPending || ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != ReasonSnapshotNotReady {
+			t.Errorf("%s: phase %s, Ready %+v; want pending, not ready for the snapshot", name, p.Status.Phase, ready)
+		}
+		if !conditions.IsTrue(p, meta.ReconcilingCondition) || conditions.Has(p, meta.StalledCondition) {
+			t.Errorf("%s: conditions %+v; want Reconciling and not Stalled", name, p.Status.Conditions)
+		}
+	}
+}
+
+func TestSnapshotUnready(t *testing.T) {
+	now := metav1.Now()
+	for _, tc := range []struct {
+		name   string
+		s      kuprav1alpha1.PreviewSnapshot
+		reason string
+	}{
+		{"ready", kuprav1alpha1.PreviewSnapshot{Status: kuprav1alpha1.PreviewSnapshotStatus{ReadyToUse: true}}, ""},
+		{"capturing", kuprav1alpha1.PreviewSnapshot{Status: kuprav1alpha1.PreviewSnapshotStatus{Phase: kuprav1alpha1.PreviewSnapshotInProgress}}, ReasonSnapshotNotReady},
+		{"failed", kuprav1alpha1.PreviewSnapshot{Status: kuprav1alpha1.PreviewSnapshotStatus{Phase: kuprav1alpha1.PreviewSnapshotFailed}}, ReasonSnapshotUnusable},
+		{"being deleted", kuprav1alpha1.PreviewSnapshot{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now}, Status: kuprav1alpha1.PreviewSnapshotStatus{ReadyToUse: true}}, ReasonSnapshotUnusable},
+	} {
+		if reason, _ := snapshotUnready(&tc.s); reason != tc.reason {
+			t.Errorf("%s: reason %q, want %q", tc.name, reason, tc.reason)
+		}
 	}
 }

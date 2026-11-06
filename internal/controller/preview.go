@@ -200,12 +200,12 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 		return ctrl.Result{}, err
 	}
-	if c := conditions.Get(&app, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation || c.Status != metav1.ConditionTrue {
-		message := fmt.Sprintf("waiting for PreviewApp %s to be checked", app.Name)
-		if c != nil && c.ObservedGeneration == app.Generation {
-			message = fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message)
-		}
-		pending(p, ReasonAppNotReady, message)
+	if c := conditions.Get(&app, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation {
+		// The PreviewApp is watched, so this is retried once it's checked.
+		waitingFor(p, ReasonAppNotReady, fmt.Sprintf("waiting for PreviewApp %s to be checked", app.Name))
+		return ctrl.Result{}, nil
+	} else if c.Status != metav1.ConditionTrue {
+		pending(p, ReasonAppNotReady, fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message))
 		return ctrl.Result{}, nil
 	}
 
@@ -261,7 +261,11 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 	switch reason {
 	case "":
-	case ReasonSnapshotNotFound, ReasonSnapshotNotReady:
+	case ReasonSnapshotNotReady:
+		// PreviewSnapshots are watched, so this is retried when its capture finishes.
+		waitingFor(p, reason, message)
+		return ctrl.Result{}, nil
+	case ReasonSnapshotNotFound, ReasonSnapshotUnusable:
 		// PreviewSnapshots are watched, so this is retried when one changes.
 		pending(p, reason, message)
 		return ctrl.Result{}, nil
@@ -686,6 +690,17 @@ func pending(p *kuprav1alpha1.Preview, reason, message string) {
 	conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
 	conditions.MarkTrue(p, meta.StalledCondition, reason, "%s", message)
 	conditions.Delete(p, meta.ReconcilingCondition)
+}
+
+// waitingFor marks a preview as waiting for something that happens without anyone's help. A preview that's running or on its way keeps its phase and readiness meanwhile.
+func waitingFor(p *kuprav1alpha1.Preview, reason, message string) {
+	switch p.Status.Phase {
+	case "", kuprav1alpha1.PreviewPending, kuprav1alpha1.PreviewFailed:
+		p.Status.Phase = kuprav1alpha1.PreviewPending
+		conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
+	}
+	markReconciling(p, reason, message)
+	conditions.Delete(p, meta.StalledCondition)
 }
 
 func failed(p *kuprav1alpha1.Preview, reason, message string) {

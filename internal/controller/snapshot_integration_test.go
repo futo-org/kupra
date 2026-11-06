@@ -695,8 +695,8 @@ func TestHoldSnapshotBeingDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reason != controller.ReasonSnapshotNotReady {
-		t.Errorf("reason = %q, want %s", reason, controller.ReasonSnapshotNotReady)
+	if reason != controller.ReasonSnapshotUnusable {
+		t.Errorf("reason = %q, want %s", reason, controller.ReasonSnapshotUnusable)
 	}
 	if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
 		t.Fatal(err)
@@ -773,10 +773,14 @@ func TestResetWithoutNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	done, err := staleReconciler(t, "", nil).FinishReset(ctx, p, "resets-gone-missing")
-	if err != nil || !done {
-		t.Fatalf("FinishReset = %v, %v; want done", done, err)
-	}
+	// The PreviewSnapshot controller adds its finalizer meanwhile, which conflicts with releasing the hold. Reconciling retries, as this does.
+	eventually(t, func() error {
+		done, err := staleReconciler(t, "", nil).FinishReset(ctx, p, "resets-gone-missing")
+		if err != nil || !done {
+			return fmt.Errorf("FinishReset = %v, %v; want done", done, err)
+		}
+		return nil
+	})
 	if p.Status.LastHandledResetAt != "1" || p.Status.RestoredFrom != nil || len(p.Status.Inventory) != 0 || apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored) != nil {
 		t.Errorf("status = %+v, want the reset handled and the restore cleared", p.Status)
 	}

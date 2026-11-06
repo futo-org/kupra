@@ -780,6 +780,9 @@ spec:
                 type: integer
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: name must be no more than 63 characters, so it fits in a label
+          rule: self.metadata.name.size() <= 63
     served: true
     storage: true
     subresources:
