@@ -12,3 +12,24 @@ issues:
 formatters:
   enable:
     - goimports
+
+linters:
+  enable:
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # State kinds, rendering and naming don't talk to the API server (ADR 2): only the controllers do. They may log.
+        functional-core:
+          files:
+            - "**/internal/state/*.go"
+            - "**/internal/render/*.go"
+            - "**/internal/names/*.go"
+            - "!$test"
+          deny:
+            - pkg: sigs.k8s.io/controller-runtime/pkg/client
+              desc: only the controllers talk to the API server
+            - pkg: sigs.k8s.io/controller-runtime/pkg/cache
+              desc: only the controllers talk to the API server
+            - pkg: k8s.io/client-go
+              desc: only the controllers talk to the API server
