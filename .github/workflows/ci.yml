@@ -31,6 +31,7 @@ jobs:
       - name: Check generated files are up to date
         run: |
           mise run generate
+          go mod tidy
           git add --intent-to-add api charts
           git diff --exit-code
 
