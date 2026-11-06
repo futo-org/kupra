@@ -32,14 +32,17 @@ func render(t *testing.T, args ...string) []unstructured.Unstructured {
 	return objs
 }
 
-// Every object the chart templates carries its labels, so a release's objects can be found together. Helm applies CRDs without templating them.
+// Every object the chart templates carries its labels, so a release's objects can be found together. Helm applies CRDs without templating them. ClusterRoles don't get commonLabels, which other ClusterRoles could aggregate them by.
 func TestObjectsAreLabelled(t *testing.T) {
 	for _, u := range render(t, "--set", "commonLabels.example=yes") {
 		labels := u.GetLabels()
 		if labels["app.kubernetes.io/part-of"] != "kupra" {
 			t.Errorf("%s %s isn't labelled app.kubernetes.io/part-of: kupra", u.GetKind(), u.GetName())
 		}
-		if labels["example"] != "yes" {
+		switch {
+		case u.GetKind() == "ClusterRole" && labels["example"] != "":
+			t.Errorf("ClusterRole %s has the commonLabels", u.GetName())
+		case u.GetKind() != "ClusterRole" && labels["example"] != "yes":
 			t.Errorf("%s %s doesn't have the commonLabels", u.GetKind(), u.GetName())
 		}
 	}
@@ -81,15 +84,6 @@ func TestPodLabelsWin(t *testing.T) {
 		pods, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "labels")
 		if pods["team"] != "pods" {
 			t.Errorf("the operator's pods are labelled team %q, want podLabels' pods", pods["team"])
-		}
-	}
-}
-
-// commonLabels go on every ClusterRole, so they may not be aggregation labels, which would add the chart's roles, and their access to Secrets, to other roles.
-func TestCommonLabelsRejectAggregation(t *testing.T) {
-	for _, key := range []string{"rbac\\.authorization\\.k8s\\.io/aggregate-to-view", "kupra\\.futo\\.tech/aggregate-to-template", "kupra\\.futo\\.tech/aggregate-to-operator"} {
-		if out, err := exec.Command("helm", "template", "kupra", "../../charts/kupra", "--set-string", "commonLabels."+key+"=true").CombinedOutput(); err == nil || !bytes.Contains(out, []byte("invalid propertyName")) {
-			t.Errorf("commonLabels %s was accepted, want the values schema to reject it", key)
 		}
 	}
 }

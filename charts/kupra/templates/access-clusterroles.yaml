@@ -3,7 +3,7 @@ kind: ClusterRole
 metadata:
   name: kupra-viewer
   labels:
-    {{- include "kupra.labels" . | nindent 4 }}
+    {{- include "kupra.clusterRoleLabels" . | nindent 4 }}
 rules:
   - apiGroups: [kupra.futo.tech]
     resources: [previewapps, previews, previewsnapshots]
@@ -14,7 +14,7 @@ kind: ClusterRole
 metadata:
   name: kupra-creator
   labels:
-    {{- include "kupra.labels" . | nindent 4 }}
+    {{- include "kupra.clusterRoleLabels" . | nindent 4 }}
 rules:
   - apiGroups: [kupra.futo.tech]
     resources: [previewapps, previews, previewsnapshots]
@@ -28,7 +28,7 @@ kind: ClusterRole
 metadata:
   name: kupra-admin
   labels:
-    {{- include "kupra.labels" . | nindent 4 }}
+    {{- include "kupra.clusterRoleLabels" . | nindent 4 }}
 rules:
   - apiGroups: [kupra.futo.tech]
     resources: [previewapps, previews, previewsnapshots]
@@ -42,7 +42,7 @@ kind: ClusterRole
 metadata:
   name: kupra-preview-access
   labels:
-    {{- include "kupra.labels" . | nindent 4 }}
+    {{- include "kupra.clusterRoleLabels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [pods]

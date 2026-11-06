@@ -8,13 +8,9 @@
       "type": "object"
     },
     "commonLabels": {
-      "description": "Labels added to every object the chart templates, but not its CRDs. They can't replace the chart's own labels.",
+      "description": "Labels added to the objects the chart templates, except its ClusterRoles, which other roles can aggregate by label, and its CRDs. They can't replace the chart's own labels.",
       "type": "object",
-      "additionalProperties": {"type": "string"},
-      "propertyNames": {
-        "description": "Aggregation labels would add the chart's ClusterRoles to other roles.",
-        "not": {"pattern": "^(rbac\\.authorization\\.k8s\\.io|kupra\\.futo\\.tech)/"}
-      }
+      "additionalProperties": {"type": "string"}
     },
     "operator": {
       "type": "object",
