@@ -74,6 +74,7 @@ type PreviewPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,categories=kupra
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="name must be no more than 63 characters, so it fits in a label"
 
 // PreviewPolicy holds admin-controlled settings for previews.
 type PreviewPolicy struct {

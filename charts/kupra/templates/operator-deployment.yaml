@@ -23,6 +23,8 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: kupra-operator
+      # Longer than the operator's 30 seconds to finish reconciling, so it has time to release its leader lease after.
+      terminationGracePeriodSeconds: 40
       {{- with .Values.operator.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
