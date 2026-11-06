@@ -7,7 +7,7 @@ kupra's design is described in its [ADRs](docs/adr), starting with [ADR 1](docs/
 Tools are pinned with [mise](https://mise.jdx.dev). After `mise install`:
 
 - `mise run check` lints and runs the unit tests.
-- `mise run generate` generates deepcopy code, CRDs and RBAC from the API types and `+kubebuilder` markers. CI fails if generated files are out of date. The operator's RBAC goes to `charts/kupra/files/role.yaml`, and the chart puts its Role in the release's namespace, so `namespace=kupra-system` in markers means the namespace kupra is installed in.
+- `mise run generate` generates deepcopy code, CRDs and RBAC from the API types and `+kubebuilder` markers. CI fails if generated files are out of date, or if `go mod tidy` would change `go.mod` or `go.sum`. The operator's RBAC goes to `charts/kupra/files/role.yaml`, and the chart puts its Role in the release's namespace, so `namespace=kupra-system` in markers means the namespace kupra is installed in.
 - `mise run test:integration` runs the controller tests against a local API server, with envtest.
 - `mise run chart:diff` diffs the rendered chart, CRDs included, against where the branch left `main`. CI comments it on pull requests that change the chart.
 - `mise run e2e:up` creates a kind cluster with the CSI snapshot controller, the CSI hostpath driver and CloudNativePG. It also installs the chart, with an operator image built by [ko](https://ko.build) from the working tree. `mise run test:smoke` checks that the installed operator reconciles a Preview. `mise run test:e2e` scales it down and runs the end-to-end tests on the cluster, and `mise run e2e:down` deletes it.
