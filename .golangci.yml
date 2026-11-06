@@ -12,3 +12,26 @@ issues:
 formatters:
   enable:
     - goimports
+
+linters:
+  enable:
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # State kinds, rendering and naming are pure functions (ADR 2): only the controllers talk to the API server.
+        functional-core:
+          files:
+            - "**/internal/state/*.go"
+            - "**/internal/render/*.go"
+            - "**/internal/names/*.go"
+            - "!$test"
+          deny:
+            - pkg: sigs.k8s.io/controller-runtime
+              desc: only the controllers talk to the API server
+            - pkg: k8s.io/client-go
+              desc: only the controllers talk to the API server
+            - pkg: net/http
+              desc: the functional core does no I/O
+            - pkg: os
+              desc: the functional core does no I/O
