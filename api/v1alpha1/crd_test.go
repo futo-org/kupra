@@ -33,7 +33,13 @@ func TestFieldsAreDescribed(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, v := range crd.Spec.Versions {
-			undescribed(t, crd.Spec.Names.Kind, v.Schema.OpenAPIV3Schema)
+			// The standard fields at the resource's root are described by Kubernetes, not kupra.
+			root := v.Schema.OpenAPIV3Schema
+			properties, _ := root["properties"].(map[string]any)
+			for _, name := range []string{"apiVersion", "kind", "metadata"} {
+				delete(properties, name)
+			}
+			undescribed(t, crd.Spec.Names.Kind, root)
 		}
 	}
 }
@@ -43,10 +49,6 @@ func undescribed(t *testing.T, path string, schema map[string]any) {
 	properties, _ := schema["properties"].(map[string]any)
 	for name, p := range properties {
 		property, _ := p.(map[string]any)
-		switch name {
-		case "apiVersion", "kind", "metadata":
-			continue
-		}
 		if _, ok := property["description"]; !ok {
 			t.Errorf("%s.%s has no description", path, name)
 		}
