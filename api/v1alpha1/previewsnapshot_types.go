@@ -95,6 +95,7 @@ type Capture struct {
 // +kubebuilder:printcolumn:name="Preview",type=string,JSONPath=`.spec.source.previewRef.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.readyToUse`
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].message`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // PreviewSnapshot is a captured copy of a preview's state.
