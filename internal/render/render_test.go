@@ -267,6 +267,20 @@ template:
 			want: "spec.template.resources[0].metadata.annotations[kupra.futo.tech/state]: Invalid value: false: must be a CEL expression",
 		},
 		{
+			name: "empty include setting",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+        annotations:
+          kupra.futo.tech/include:
+`,
+			want: "spec.template.resources[0].metadata.annotations[kupra.futo.tech/include]: Invalid value: null: must be a CEL expression",
+		},
+		{
 			name: "include given with Expr",
 			spec: `
 template:

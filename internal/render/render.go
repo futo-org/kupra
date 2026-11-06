@@ -198,8 +198,8 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 	if annotations, ok := metadata["annotations"].(map[string]any); ok {
 		for _, key := range settingAnnotations {
 			keyPath := metaPath.Child("annotations").Key(key)
-			switch expression := annotations[key].(type) {
-			case nil:
+			value, ok := annotations[key]
+			switch expression := value.(type) {
 			case string:
 				prg, err := e.compile(expression, cel.BoolType)
 				if err != nil {
@@ -207,8 +207,10 @@ func compileResource(e *env, raw runtime.RawExtension, fldPath *field.Path) (*re
 				}
 				r.settings[key] = prg
 			default:
-				// An unquoted false in YAML is a bool, not the expression "false".
-				errs = append(errs, field.TypeInvalid(keyPath, expression, "must be a CEL expression"))
+				// An unquoted false in YAML is a bool, not the expression "false", and an empty value is null.
+				if ok {
+					errs = append(errs, field.TypeInvalid(keyPath, expression, "must be a CEL expression"))
+				}
 			}
 			if _, ok := annotations[key+exprSuffix]; ok {
 				errs = append(errs, field.Forbidden(metaPath.Child("annotations").Key(key+exprSuffix), "may not be set"))
