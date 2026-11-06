@@ -49,17 +49,17 @@ const (
 )
 
 type Parameter struct {
-	// Name is how expressions refer to the parameter, as in parameters.<name>, and the key of its value in a Preview.
+	// Name is the parameter's name in expressions and in a Preview's parameters.
 	Name Identifier `json:"name"`
 
 	// Title is the parameter's label in the dashboard.
 	Title string `json:"title"`
 
-	// Description is shown with the parameter in the dashboard.
+	// Description is the parameter's help text in the dashboard.
 	// +optional
 	Description string `json:"description,omitempty"`
 
-	// Type is what kind of value the parameter takes. Expressions see it as that type.
+	// Type is the parameter's value type.
 	// +optional
 	// +kubebuilder:default=string
 	Type ParameterType `json:"type,omitempty"`
@@ -73,7 +73,7 @@ type Parameter struct {
 	// +optional
 	Default *string `json:"default,omitempty"`
 
-	// Required parameters must be given a value by each Preview, unless they have a default.
+	// Required means a Preview must give the parameter a value, unless it has a default.
 	// +optional
 	Required bool `json:"required,omitempty"`
 
@@ -87,7 +87,8 @@ type UIHintType string
 
 const UIHintImageTag UIHintType = "imageTag"
 
-// +kubebuilder:validation:XValidation:rule="self.type == 'imageTag' ? has(self.imageTag) : !has(self.imageTag)",message="imageTag must be set when type is imageTag, and only then"
+// +kubebuilder:validation:XValidation:rule="self.type != 'imageTag' || has(self.imageTag)",message="imageTag is required when type is imageTag"
+// +kubebuilder:validation:XValidation:rule="self.type == 'imageTag' || !has(self.imageTag)",message="imageTag may not be set unless type is imageTag"
 type UIHint struct {
 	// Type is the kind of input the dashboard shows.
 	Type UIHintType `json:"type"`
@@ -103,7 +104,7 @@ type ImageTagHint struct {
 }
 
 type Variable struct {
-	// Name is how expressions refer to the variable, as in variables.<name>.
+	// Name is the variable's name in expressions.
 	Name Identifier `json:"name"`
 
 	// Expression is a CEL expression.
@@ -125,11 +126,11 @@ type Template struct {
 }
 
 type PreviewAppStatus struct {
-	// ObservedGeneration is the generation the status describes.
+	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Conditions say whether the app passed its checks (Ready), and if not, why (Stalled).
+	// Conditions holds the conditions for the PreviewApp.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -149,9 +150,9 @@ type PreviewApp struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Spec describes the app.
+	// Spec is the desired state of the PreviewApp.
 	Spec PreviewAppSpec `json:"spec"`
-	// Status says whether the app passed its checks.
+	// Status is the observed state of the PreviewApp.
 	// +optional
 	Status PreviewAppStatus `json:"status,omitempty"`
 }

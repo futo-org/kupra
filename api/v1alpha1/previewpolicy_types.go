@@ -9,7 +9,7 @@ import (
 
 // PreviewPolicySpec holds the settings for preview namespaces. Fields left out are taken from the default PreviewPolicy.
 type PreviewPolicySpec struct {
-	// Apply is how templates are applied in preview namespaces.
+	// Apply is how templates are applied.
 	// +optional
 	Apply *ApplySettings `json:"apply,omitempty"`
 
@@ -47,7 +47,7 @@ type APIServerAccess struct {
 }
 
 type NetworkPolicyTemplate struct {
-	// Metadata is the NetworkPolicy's name, labels and annotations.
+	// Metadata is the NetworkPolicy's metadata.
 	Metadata TemplateMetadata `json:"metadata"`
 
 	// Spec is the NetworkPolicy's spec.
@@ -55,7 +55,7 @@ type NetworkPolicyTemplate struct {
 }
 
 type TemplateMetadata struct {
-	// Name is the object's name in each preview namespace.
+	// Name is the object's name.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
@@ -79,11 +79,11 @@ type NamespaceMetadata struct {
 }
 
 type PreviewPolicyStatus struct {
-	// ObservedGeneration is the generation the status describes.
+	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Conditions say whether previews can use the policy (Ready), and if not, why (Stalled).
+	// Conditions holds the conditions for the PreviewPolicy.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -101,9 +101,8 @@ type PreviewPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Spec is the settings for preview namespaces. Fields left out are taken from the default PreviewPolicy.
 	Spec PreviewPolicySpec `json:"spec,omitempty"`
-	// Status says whether previews can use the policy.
+	// Status is the observed state of the PreviewPolicy.
 	// +optional
 	Status PreviewPolicyStatus `json:"status,omitempty"`
 }

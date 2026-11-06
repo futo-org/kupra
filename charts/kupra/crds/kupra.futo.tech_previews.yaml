@@ -59,7 +59,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec is the app to run and how.
+            description: Spec is the desired state of the Preview.
             properties:
               appRef:
                 description: AppRef names the PreviewApp in the Preview's namespace.
@@ -200,12 +200,10 @@ spec:
             - appRef
             type: object
           status:
-            description: Status is how far the preview has got.
+            description: Status is the observed state of the Preview.
             properties:
               conditions:
-                description: Conditions say whether the preview is ready (Ready),
-                  working on it (Reconciling) or stuck (Stalled), and whether its
-                  state has been restored (Restored).
+                description: Conditions holds the conditions for the Preview.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -301,8 +299,7 @@ spec:
                   annotation.
                 type: string
               links:
-                description: Links are the PreviewApp's links, evaluated for this
-                  preview.
+                description: Links are the PreviewApp's links for this preview.
                 items:
                   description: LinkStatus is one of a preview's links.
                   properties:
@@ -310,7 +307,7 @@ spec:
                       description: Name is the link's label.
                       type: string
                     url:
-                      description: URL is where the link goes.
+                      description: URL is the link's URL.
                       type: string
                   required:
                   - name
@@ -325,7 +322,7 @@ spec:
                   in.
                 type: string
               observedGeneration:
-                description: ObservedGeneration is the generation the status describes.
+                description: ObservedGeneration is the last observed generation.
                 format: int64
                 type: integer
               phase:

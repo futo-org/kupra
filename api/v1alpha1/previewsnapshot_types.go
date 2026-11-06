@@ -42,7 +42,7 @@ const (
 )
 
 type PreviewSnapshotStatus struct {
-	// ObservedGeneration is the generation the status describes.
+	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
@@ -71,11 +71,11 @@ type PreviewSnapshotStatus struct {
 	// +listType=atomic
 	Captures []Capture `json:"captures,omitempty"`
 
-	// ReadyToUse is set once the capture succeeded, and previews can start from the snapshot.
+	// ReadyToUse indicates if previews can start from the snapshot.
 	// +optional
 	ReadyToUse bool `json:"readyToUse,omitempty"`
 
-	// Conditions say whether the snapshot is ready (Ready), still capturing or held from deletion (Reconciling), or failed (Stalled).
+	// Conditions holds the conditions for the PreviewSnapshot.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -84,11 +84,11 @@ type PreviewSnapshotStatus struct {
 
 // Capture is a captured state resource.
 type Capture struct {
-	// Group is the resource's API group, empty for the core group.
+	// Group is the resource's API group.
 	Group string `json:"group"`
 	// Kind is the resource's kind.
 	Kind string `json:"kind"`
-	// Name is the resource's name in the preview's template, which a restored resource is matched to.
+	// Name is the resource's name.
 	Name string `json:"name"`
 	// Data are the objects in the snapshot's namespace that hold the capture, such as VolumeSnapshots.
 	// +listType=atomic
@@ -109,9 +109,9 @@ type PreviewSnapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Spec is what to capture and how.
+	// Spec is the desired state of the PreviewSnapshot.
 	Spec PreviewSnapshotSpec `json:"spec"`
-	// Status is how the capture went, and what it holds.
+	// Status is the observed state of the PreviewSnapshot.
 	// +optional
 	Status PreviewSnapshotStatus `json:"status,omitempty"`
 }
