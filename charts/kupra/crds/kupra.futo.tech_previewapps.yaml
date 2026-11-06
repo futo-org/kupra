@@ -49,7 +49,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec describes the app.
+            description: Spec is the desired state of the PreviewApp.
             properties:
               links:
                 description: Links are shown for each preview, evaluated into its
@@ -82,7 +82,7 @@ spec:
                         of their type.
                       type: string
                     description:
-                      description: Description is shown with the parameter in the
+                      description: Description is the parameter's help text in the
                         dashboard.
                       type: string
                     enum:
@@ -92,22 +92,21 @@ spec:
                       type: array
                       x-kubernetes-list-type: atomic
                     name:
-                      description: Name is how expressions refer to the parameter,
-                        as in parameters.<name>, and the key of its value in a Preview.
+                      description: Name is the parameter's name in expressions and
+                        in a Preview's parameters.
                       maxLength: 63
                       pattern: ^[A-Za-z_][A-Za-z0-9_]*$
                       type: string
                     required:
-                      description: Required parameters must be given a value by each
-                        Preview, unless they have a default.
+                      description: Required means a Preview must give the parameter
+                        a value, unless it has a default.
                       type: boolean
                     title:
                       description: Title is the parameter's label in the dashboard.
                       type: string
                     type:
                       default: string
-                      description: Type is what kind of value the parameter takes.
-                        Expressions see it as that type.
+                      description: Type is the parameter's value type.
                       enum:
                       - string
                       - integer
@@ -136,9 +135,10 @@ spec:
                       - type
                       type: object
                       x-kubernetes-validations:
-                      - message: imageTag must be set when type is imageTag, and only
-                          then
-                        rule: 'self.type == ''imageTag'' ? has(self.imageTag) : !has(self.imageTag)'
+                      - message: imageTag is required when type is imageTag
+                        rule: self.type != 'imageTag' || has(self.imageTag)
+                      - message: imageTag may not be set unless type is imageTag
+                        rule: self.type == 'imageTag' || !has(self.imageTag)
                   required:
                   - name
                   - title
@@ -176,8 +176,7 @@ spec:
                       description: Expression is a CEL expression.
                       type: string
                     name:
-                      description: Name is how expressions refer to the variable,
-                        as in variables.<name>.
+                      description: Name is the variable's name in expressions.
                       maxLength: 63
                       pattern: ^[A-Za-z_][A-Za-z0-9_]*$
                       type: string
@@ -193,11 +192,10 @@ spec:
             - template
             type: object
           status:
-            description: Status says whether the app passed its checks.
+            description: Status is the observed state of the PreviewApp.
             properties:
               conditions:
-                description: Conditions say whether the app passed its checks (Ready),
-                  and if not, why (Stalled).
+                description: Conditions holds the conditions for the PreviewApp.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -257,7 +255,7 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               observedGeneration:
-                description: ObservedGeneration is the generation the status describes.
+                description: ObservedGeneration is the last observed generation.
                 format: int64
                 type: integer
             type: object

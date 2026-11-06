@@ -57,7 +57,7 @@ const (
 )
 
 type PreviewStatus struct {
-	// ObservedGeneration is the generation the status describes.
+	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
@@ -77,7 +77,7 @@ type PreviewStatus struct {
 	// +optional
 	LastHandledResetAt string `json:"lastHandledResetAt,omitempty"`
 
-	// Links are the PreviewApp's links, evaluated for this preview.
+	// Links are the PreviewApp's links for this preview.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -88,7 +88,7 @@ type PreviewStatus struct {
 	// +listType=atomic
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
 
-	// Conditions say whether the preview is ready (Ready), working on it (Reconciling) or stuck (Stalled), and whether its state has been restored (Restored).
+	// Conditions holds the conditions for the Preview.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -110,7 +110,7 @@ type InventoryEntry struct {
 type LinkStatus struct {
 	// Name is the link's label.
 	Name string `json:"name"`
-	// URL is where the link goes.
+	// URL is the link's URL.
 	URL string `json:"url"`
 }
 
@@ -130,9 +130,9 @@ type Preview struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Spec is the app to run and how.
+	// Spec is the desired state of the Preview.
 	Spec PreviewSpec `json:"spec"`
-	// Status is how far the preview has got.
+	// Status is the observed state of the Preview.
 	// +optional
 	Status PreviewStatus `json:"status,omitempty"`
 }

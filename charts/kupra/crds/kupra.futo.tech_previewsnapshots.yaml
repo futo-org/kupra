@@ -55,7 +55,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec is what to capture and how.
+            description: Spec is the desired state of the PreviewSnapshot.
             properties:
               mode:
                 default: Offline
@@ -91,7 +91,7 @@ spec:
             - source
             type: object
           status:
-            description: Status is how the capture went, and what it holds.
+            description: Status is the observed state of the PreviewSnapshot.
             properties:
               appRef:
                 description: AppRef is the PreviewApp the source preview ran.
@@ -135,15 +135,13 @@ spec:
                       type: array
                       x-kubernetes-list-type: atomic
                     group:
-                      description: Group is the resource's API group, empty for the
-                        core group.
+                      description: Group is the resource's API group.
                       type: string
                     kind:
                       description: Kind is the resource's kind.
                       type: string
                     name:
-                      description: Name is the resource's name in the preview's template,
-                        which a restored resource is matched to.
+                      description: Name is the resource's name.
                       type: string
                   required:
                   - data
@@ -158,8 +156,7 @@ spec:
                 format: date-time
                 type: string
               conditions:
-                description: Conditions say whether the snapshot is ready (Ready),
-                  still capturing or held from deletion (Reconciling), or failed (Stalled).
+                description: Conditions holds the conditions for the PreviewSnapshot.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -219,7 +216,7 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               observedGeneration:
-                description: ObservedGeneration is the generation the status describes.
+                description: ObservedGeneration is the last observed generation.
                 format: int64
                 type: integer
               parameters:
@@ -237,8 +234,7 @@ spec:
                 - Deleting
                 type: string
               readyToUse:
-                description: ReadyToUse is set once the capture succeeded, and previews
-                  can start from the snapshot.
+                description: ReadyToUse indicates if previews can start from the snapshot.
                 type: boolean
               startTime:
                 description: StartTime is when the capture started.
