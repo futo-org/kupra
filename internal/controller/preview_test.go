@@ -330,10 +330,22 @@ func TestWaitingFor(t *testing.T) {
 		t.Errorf("conditions = %+v, want Reconciling and not Stalled", p.Status.Conditions)
 	}
 
-	p = &kuprav1alpha1.Preview{}
-	waitingFor(p, ReasonSnapshotNotReady, "PreviewSnapshot base is not ready")
-	if p.Status.Phase != kuprav1alpha1.PreviewPending || !conditions.IsFalse(p, meta.ReadyCondition) || conditions.Has(p, meta.StalledCondition) {
-		t.Errorf("phase %s, conditions %+v; want a new preview pending, not ready and not stalled", p.Status.Phase, p.Status.Conditions)
+	// A new preview, and one that was blocked or had failed, is pending for the wait's reason, and no longer stalled.
+	for name, setUp := range map[string]func(*kuprav1alpha1.Preview){
+		"new":     func(*kuprav1alpha1.Preview) {},
+		"blocked": func(p *kuprav1alpha1.Preview) { pending(p, ReasonAppNotReady, "PreviewApp app failed its checks") },
+		"failed":  func(p *kuprav1alpha1.Preview) { failed(p, ReasonRenderFailed, "invalid template") },
+	} {
+		p := &kuprav1alpha1.Preview{}
+		setUp(p)
+		waitingFor(p, ReasonSnapshotNotReady, "PreviewSnapshot base is not ready")
+		ready := conditions.Get(p, meta.ReadyCondition)
+		if p.Status.Phase != kuprav1alpha1.PreviewPending || ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != ReasonSnapshotNotReady {
+			t.Errorf("%s: phase %s, Ready %+v; want pending, not ready for the snapshot", name, p.Status.Phase, ready)
+		}
+		if !conditions.IsTrue(p, meta.ReconcilingCondition) || conditions.Has(p, meta.StalledCondition) {
+			t.Errorf("%s: conditions %+v; want Reconciling and not Stalled", name, p.Status.Conditions)
+		}
 	}
 }
 

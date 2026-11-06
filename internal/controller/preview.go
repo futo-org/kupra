@@ -692,9 +692,10 @@ func pending(p *kuprav1alpha1.Preview, reason, message string) {
 	conditions.Delete(p, meta.ReconcilingCondition)
 }
 
-// waitingFor marks a preview as waiting for something that happens without anyone's help. A running preview keeps its phase and readiness meanwhile.
+// waitingFor marks a preview as waiting for something that happens without anyone's help. A preview that's running or on its way keeps its phase and readiness meanwhile.
 func waitingFor(p *kuprav1alpha1.Preview, reason, message string) {
-	if p.Status.Phase == "" || p.Status.Phase == kuprav1alpha1.PreviewPending {
+	switch p.Status.Phase {
+	case "", kuprav1alpha1.PreviewPending, kuprav1alpha1.PreviewFailed:
 		p.Status.Phase = kuprav1alpha1.PreviewPending
 		conditions.MarkFalse(p, meta.ReadyCondition, reason, "%s", message)
 	}
