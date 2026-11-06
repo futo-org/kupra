@@ -73,6 +73,7 @@ template:
 
 // TestClusterState captures a CloudNativePG cluster, deletes its preview, and restores the capture into another, which connects with its own generated credentials.
 func TestClusterState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "e2e-cnpg-"}}
 	if err := k8s.Create(ctx, ns); err != nil {
