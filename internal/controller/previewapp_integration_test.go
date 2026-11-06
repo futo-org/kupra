@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -245,6 +246,11 @@ func TestExamplesAreAccepted(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Examples that show planned features say so, and may have fields the API doesn't have yet.
+		validation := "Strict"
+		if bytes.HasPrefix(data, []byte("# Uses a feature planned")) || bytes.HasPrefix(data, []byte("# Uses features planned")) {
+			validation = "Ignore"
+		}
 		for _, doc := range bytes.Split(data, []byte("\n---\n")) {
 			var u unstructured.Unstructured
 			if err := yaml.Unmarshal(doc, &u.Object); err != nil {
@@ -254,8 +260,45 @@ func TestExamplesAreAccepted(t *testing.T) {
 				continue
 			}
 			u.SetNamespace("examples")
-			if err := k8s.Create(ctx, &u, client.DryRunAll); err != nil {
+			if err := k8s.Create(ctx, &u, client.DryRunAll, client.FieldValidation(validation)); err != nil {
 				t.Errorf("%s: %v", filepath.Base(file), err)
+			}
+		}
+	}
+}
+
+// TestDocsAreAccepted checks that the complete objects in the README and the docs, outside the ADRs, are valid.
+func TestDocsAreAccepted(t *testing.T) {
+	ctx := context.Background()
+	createNamespace(t, "docs", nil)
+	files, err := filepath.Glob(filepath.Join("..", "..", "docs", "*.md"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("finding docs: %v", err)
+	}
+	files = append(files, filepath.Join("..", "..", "README.md"))
+	block := regexp.MustCompile("(?s)```yaml\n(.*?)```")
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range block.FindAllSubmatch(data, -1) {
+			var u unstructured.Unstructured
+			if err := yaml.Unmarshal(m[1], &u.Object); err != nil {
+				t.Errorf("%s: %v", filepath.Base(file), err)
+				continue
+			}
+			// Fragments, such as values or part of a spec, aren't objects.
+			if u.GetAPIVersion() == "" || u.GetKind() == "" {
+				continue
+			}
+			if u.GetNamespace() != "" {
+				u.SetNamespace("docs")
+			} else if mapping, err := k8s.RESTMapper().RESTMapping(u.GroupVersionKind().GroupKind(), u.GroupVersionKind().Version); err == nil && mapping.Scope.Name() == "namespace" {
+				u.SetNamespace("docs")
+			}
+			if err := k8s.Create(ctx, &u, client.DryRunAll, client.FieldValidation("Strict")); err != nil {
+				t.Errorf("%s: %s %s: %v", filepath.Base(file), u.GetKind(), u.GetName(), err)
 			}
 		}
 	}
