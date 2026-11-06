@@ -25,8 +25,13 @@ func waitForPolicy(t *testing.T, name string, status metav1.ConditionStatus, rea
 			return err
 		}
 		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
-		if p.Status.ObservedGeneration != p.Generation || c == nil || c.Status != status || c.Reason != reason {
-			return fmt.Errorf("PreviewPolicy %s: Ready %+v; want %s with reason %s", name, c, status, reason)
+		switch {
+		case p.Status.ObservedGeneration != p.Generation:
+			return fmt.Errorf("PreviewPolicy %s isn't reconciled yet", name)
+		case c == nil:
+			return fmt.Errorf("PreviewPolicy %s has no Ready condition", name)
+		case c.Status != status || c.Reason != reason:
+			return fmt.Errorf("PreviewPolicy %s is Ready %s (%s), want %s (%s)", name, c.Status, c.Reason, status, reason)
 		}
 		return nil
 	})
