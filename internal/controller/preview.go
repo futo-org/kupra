@@ -148,12 +148,8 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	}
 
 	_, settings, err := policy.Resolve(ctx, r.Client, p.Namespace)
-	if notFound := (*policy.NotFoundError)(nil); errors.As(err, &notFound) {
-		pending(p, ReasonPolicyNotFound, err.Error())
-		return ctrl.Result{}, nil
-	}
-	if noRole := (*policy.NoTemplateRoleError)(nil); errors.As(err, &noRole) {
-		pending(p, ReasonNoTemplateRole, err.Error())
+	if reason, ok := policyProblem(err); ok {
+		pending(p, reason, err.Error())
 		return ctrl.Result{}, nil
 	}
 	if err != nil {

@@ -61,6 +61,11 @@ func Setup(ctx context.Context, mgr ctrl.Manager, opts Options) error {
 		return err
 	}
 
+	policies := &PreviewPolicyReconciler{Client: mgr.GetClient()}
+	if err := policies.SetupWithManager(mgr); err != nil {
+		return err
+	}
+
 	snapshots := &PreviewSnapshotReconciler{
 		Client:    mgr.GetClient(),
 		APIReader: mgr.GetAPIReader(),

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/fluxcd/pkg/apis/meta"
@@ -91,11 +90,8 @@ func (r *PreviewAppReconciler) check(ctx context.Context, app *kuprav1alpha1.Pre
 	}
 
 	_, settings, err := policy.Resolve(ctx, r.Client, app.Namespace)
-	if notFound := (*policy.NotFoundError)(nil); errors.As(err, &notFound) {
-		return ReasonPolicyNotFound, err.Error(), nil
-	}
-	if noRole := (*policy.NoTemplateRoleError)(nil); errors.As(err, &noRole) {
-		return ReasonNoTemplateRole, err.Error(), nil
+	if reason, ok := policyProblem(err); ok {
+		return reason, err.Error(), nil
 	}
 	if err != nil {
 		return "", "", err
