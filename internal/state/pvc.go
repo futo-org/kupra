@@ -20,11 +20,11 @@ func (persistentVolumeClaim) Check(resource map[string]any, fldPath *field.Path)
 	var errs field.ErrorList
 	for _, key := range []string{"dataSource", "dataSourceRef", "dataSourceExpr", "dataSourceRefExpr"} {
 		if _, ok := spec[key]; ok {
-			errs = append(errs, field.Forbidden(fldPath.Child("spec", key), "may not be set on a claim that's state"))
+			errs = append(errs, field.Forbidden(fldPath.Child("spec", key), "may not be set on a claim with managed state"))
 		}
 	}
 	if _, ok := resource["specExpr"]; ok {
-		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), "may not be set on a claim that's state"))
+		errs = append(errs, field.Forbidden(fldPath.Child("specExpr"), "may not be set on a claim with managed state"))
 	}
 	return errs
 }

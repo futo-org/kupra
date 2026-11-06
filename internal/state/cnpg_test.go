@@ -229,8 +229,8 @@ func TestClusterCaptureFailedBackup(t *testing.T) {
 	backup := Ref{GroupVersionKind: backupGVK, Namespace: "preview", Name: n.Name("capture")}
 	observed := Observed{
 		backup: object(t, `status: {phase: failed, error: no volume snapshot class}`),
-		{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: n.Name("data")}: nil,
-		{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: n.Name("wal")}:  nil,
+		{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: n.Name("pg-data")}: nil,
+		{GroupVersionKind: volumeSnapshotGVK, Namespace: "app", Name: n.Name("pg-wal")}:  nil,
 	}
 	resp := kind.Capture(CaptureRequest{Resource: object(t, database), Namespace: "app", Names: n, Observed: observed})
 	if !strings.Contains(resp.Failed, "no volume snapshot class") {
