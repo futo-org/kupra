@@ -11,9 +11,11 @@ zizmor = "1.31.1"
 kind = "0.33.0"
 kubectl = "1.37.1"
 helm = "4.3.1"
+"asdf:dex4er/asdf-helm-diff" = { version = "3.15.7", depends = ["helm"] }
 ko = "0.19.1"
 
 [env]
+HELM_PLUGINS = { value = "{{ tools | get(key='asdf:dex4er/asdf-helm-diff') | get(key='path') }}", tools = true }
 # renovate: datasource=github-releases depName=kubernetes-csi/external-snapshotter
 E2E_SNAPSHOTTER_VERSION = "v8.7.0"
 # renovate: datasource=github-releases depName=kubernetes-csi/csi-driver-host-path

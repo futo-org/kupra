@@ -1,0 +1,69 @@
+name: Chart diff
+
+on:
+  pull_request:
+    paths:
+      - charts/**
+      - .github/workflows/chart-diff.yml
+      - .mise/tasks/chart/diff
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  diff:
+    name: Diff the rendered chart
+    runs-on: ubuntu-latest
+    # Pull requests from forks get a read-only token, which can't comment.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup mise
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+
+      - name: Diff the rendered chart
+        run: mise run chart:diff >"$RUNNER_TEMP/chart.diff"
+
+      - name: Write the comment
+        id: comment
+        run: |
+          delimiter="EOF-$(openssl rand -hex 8)"
+          {
+            echo "body<<$delimiter"
+            echo '## Rendered chart'
+            echo
+            if [ -s "$RUNNER_TEMP/chart.diff" ]; then
+              echo '<details><summary>Manifest diff</summary>'
+              echo
+              echo '```diff'
+              # A comment holds up to 65536 characters.
+              # The cut can fall within a line, which gets a newline so the fence starts on its own.
+              head -c 60000 "$RUNNER_TEMP/chart.diff" | sed '$a\'
+              echo '```'
+              if [ "$(wc -c <"$RUNNER_TEMP/chart.diff")" -gt 60000 ]; then
+                echo
+                echo 'The diff is cut short. Run `mise run chart:diff` for all of it.'
+              fi
+              echo
+              echo '</details>'
+            else
+              echo 'No changes.'
+            fi
+            echo "$delimiter"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Comment the diff
+        uses: immich-app/devtools/actions/sticky-comment@0135acd12ad9f3369b94a2aa3c0ae8c835a4e926 # sticky-comment-action-v1.0.0
+        with:
+          id: chart-diff
+          body: ${{ steps.comment.outputs.body }}

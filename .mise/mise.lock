@@ -2,6 +2,11 @@
 
 lockfile_version = 3
 
+[[tools."asdf:dex4er/asdf-helm-diff"]]
+version = "3.15.7"
+backend = "asdf:dex4er/asdf-helm-diff"
+specifiers = ["3.15.7"]
+
 [[tools.go]]
 version = "1.27.3"
 backend = "core:go"
