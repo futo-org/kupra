@@ -1,8 +1,10 @@
 package v1alpha1
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -56,5 +58,50 @@ func undescribed(t *testing.T, path string, schema map[string]any) {
 	}
 	if items, ok := schema["items"].(map[string]any); ok {
 		undescribed(t, path+"[]", items)
+	}
+}
+
+// The chart's values schema lists the PreviewPolicy spec's fields for its defaultPolicy, so a typo fails the install.
+func TestValuesSchemaHasPolicyFields(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "charts", "kupra", "crds", "kupra.futo.tech_previewpolicies.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crd struct {
+		Spec struct {
+			Versions []struct {
+				Schema struct {
+					OpenAPIV3Schema struct {
+						Properties struct {
+							Spec struct {
+								Properties map[string]any
+							}
+						}
+					} `json:"openAPIV3Schema"`
+				}
+			}
+		}
+	}
+	if err := yaml.Unmarshal(data, &crd); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join("..", "..", "charts", "kupra", "values.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		Properties struct {
+			DefaultPolicy struct {
+				Properties map[string]any
+			} `json:"defaultPolicy"`
+		}
+	}
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Sorted(maps.Keys(crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Spec.Properties))
+	got := slices.Sorted(maps.Keys(values.Properties.DefaultPolicy.Properties))
+	if !slices.Equal(got, want) {
+		t.Errorf("values schema's defaultPolicy has %v, want the PreviewPolicy spec's %v", got, want)
 	}
 }

@@ -3,11 +3,15 @@ kind: ServiceAccount
 metadata:
   name: kupra-operator
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: kupra-operator
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -21,6 +25,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: kupra-operator-bind
+  labels:
+    {{- include "kupra.clusterRoleLabels" . | nindent 4 }}
 aggregationRule:
   clusterRoleSelectors:
     - matchLabels:
@@ -31,7 +37,7 @@ kind: ClusterRole
 metadata:
   name: kupra-operator-bind-base
   labels:
-    kupra.futo.tech/aggregate-to-operator: "true"
+    {{- include "kupra.labelsWith" (dict "ctx" . "labels" (dict "kupra.futo.tech/aggregate-to-operator" "true") "noCommon" true) | nindent 4 }}
 rules:
   - apiGroups: [rbac.authorization.k8s.io]
     resources: [clusterroles]
@@ -42,6 +48,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: kupra-operator-bind
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -56,6 +64,8 @@ kind: RoleBinding
 metadata:
   name: kupra-operator
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

@@ -2,6 +2,8 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicy
 metadata:
   name: kupra-created-by
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 spec:
   matchConstraints:
     resourceRules:
@@ -37,5 +39,7 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicyBinding
 metadata:
   name: kupra-created-by
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 spec:
   policyName: kupra-created-by

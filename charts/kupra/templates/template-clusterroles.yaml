@@ -2,6 +2,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: kupra-preview-template
+  labels:
+    {{- include "kupra.clusterRoleLabels" . | nindent 4 }}
 aggregationRule:
   clusterRoleSelectors:
     - matchLabels:
@@ -12,7 +14,7 @@ kind: ClusterRole
 metadata:
   name: kupra-preview-template-base
   labels:
-    kupra.futo.tech/aggregate-to-template: "true"
+    {{- include "kupra.labelsWith" (dict "ctx" . "labels" (dict "kupra.futo.tech/aggregate-to-template" "true") "noCommon" true) | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [configmaps, persistentvolumeclaims, secrets, services]

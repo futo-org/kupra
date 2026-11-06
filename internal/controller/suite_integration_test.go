@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -124,13 +125,15 @@ func bindRestoreCopies(ctx context.Context) {
 }
 
 // apply server-side applies the YAML documents in a file.
-func apply(t *testing.T, path string) {
+// applyTemplate renders one of the chart's templates, with its default values, and applies it.
+func applyTemplate(t *testing.T, name string) {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	chart := filepath.Join("..", "..", "charts", "kupra")
+	out, err := exec.Command("helm", "template", "kupra", chart, "--namespace", kupraNamespace, "--show-only", "templates/"+name).Output()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering %s: %v", name, err)
 	}
-	applyYAML(t, data)
+	applyYAML(t, out)
 }
 
 func applyYAML(t *testing.T, data []byte) {
@@ -169,7 +172,7 @@ func eventually(t *testing.T, check func() error) {
 func setUpPolicies(t *testing.T, policies ...*kuprav1alpha1.PreviewPolicy) {
 	t.Helper()
 	chart := filepath.Join("..", "..", "charts", "kupra")
-	apply(t, filepath.Join(chart, "templates", "template-clusterroles.yaml"))
+	applyTemplate(t, "template-clusterroles.yaml")
 	data, err := os.ReadFile(filepath.Join(chart, "values.yaml"))
 	if err != nil {
 		t.Fatal(err)
