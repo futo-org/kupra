@@ -17,6 +17,7 @@ func checkParameters(params []kuprav1alpha1.Parameter, fldPath *field.Path) fiel
 	var errs field.ErrorList
 	for _, p := range params {
 		pPath := fldPath.Key(string(p.Name))
+		errs = append(errs, checkName(p.Name, pPath.Child("name"))...)
 		for i, raw := range p.Enum {
 			if _, err := parameterValue(p.Type, raw); err != nil {
 				errs = append(errs, field.Invalid(pPath.Child("enum").Index(i), raw, err.Error()))
@@ -32,6 +33,17 @@ func checkParameters(params []kuprav1alpha1.Parameter, fldPath *field.Path) fiel
 		}
 	}
 	return errs
+}
+
+// keywords are the CEL keywords that are valid identifiers in a PreviewApp, but can't be selected, as in parameters.true.
+var keywords = []string{"false", "in", "null", "true"}
+
+// checkName checks the name of a parameter or variable.
+func checkName(name kuprav1alpha1.Identifier, fldPath *field.Path) field.ErrorList {
+	if slices.Contains(keywords, string(name)) {
+		return field.ErrorList{field.Invalid(fldPath, name, "may not be a CEL keyword")}
+	}
+	return nil
 }
 
 // resolveParameters checks a Preview's parameter values against the PreviewApp's definitions, and fills in defaults.

@@ -231,6 +231,56 @@ template:
 			want: "must evaluate to bool, not string",
 		},
 		{
+			name: "parameter named after a keyword",
+			spec: `
+parameters:
+  - name: "true"
+    title: T
+template:
+  resources: []
+`,
+			want: `spec.parameters[true].name: Invalid value: "true": may not be a CEL keyword`,
+		},
+		{
+			name: "variable named after a keyword",
+			spec: `
+variables:
+  - name: "null"
+    expression: '1'
+template:
+  resources: []
+`,
+			want: `spec.variables[null].name: Invalid value: "null": may not be a CEL keyword`,
+		},
+		{
+			name: "state setting that isn't a string",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+        annotations:
+          kupra.futo.tech/state: false
+`,
+			want: "spec.template.resources[0].metadata.annotations[kupra.futo.tech/state]: Invalid value: false: must be a CEL expression",
+		},
+		{
+			name: "empty include setting",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+        annotations:
+          kupra.futo.tech/include:
+`,
+			want: "spec.template.resources[0].metadata.annotations[kupra.futo.tech/include]: Invalid value: null: must be a CEL expression",
+		},
+		{
 			name: "include given with Expr",
 			spec: `
 template:
