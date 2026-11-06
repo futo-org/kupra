@@ -21,10 +21,10 @@ type PreviewSpec struct {
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind in ['User', 'Group', 'ServiceAccount'])",message="owners must be users, groups or service accounts"
-	// +kubebuilder:validation:XValidation:rule="self.all(s, s.name != '')",message="owners need a name"
-	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind != 'ServiceAccount' || (has(s.__namespace__) && s.__namespace__ != ''))",message="service account owners need a namespace"
+	// +kubebuilder:validation:XValidation:rule="self.all(s, s.name != '')",message="owners must have a name"
+	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind != 'ServiceAccount' || (has(s.__namespace__) && s.__namespace__ != ''))",message="service account owners must have a namespace"
 	// +kubebuilder:validation:XValidation:rule="self.all(s, !has(s.apiGroup) || s.apiGroup == '' || (s.kind != 'ServiceAccount' && s.apiGroup == 'rbac.authorization.k8s.io'))",message="apiGroup must be rbac.authorization.k8s.io for users and groups, and empty for service accounts"
-	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners can't be system users or groups, such as system:authenticated"
+	// +kubebuilder:validation:XValidation:rule="self.all(s, s.kind == 'ServiceAccount' || !s.name.startsWith('system:'))",message="owners may not be system users or groups"
 	Owners []rbacv1.Subject `json:"owners,omitempty"`
 
 	// RestoreFrom is the snapshot the preview's state starts from, when it starts or is reset. Without it, state starts empty.
@@ -57,6 +57,7 @@ const (
 )
 
 type PreviewStatus struct {
+	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
@@ -76,6 +77,7 @@ type PreviewStatus struct {
 	// +optional
 	LastHandledResetAt string `json:"lastHandledResetAt,omitempty"`
 
+	// Links are the PreviewApp's links for this preview.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
@@ -86,6 +88,7 @@ type PreviewStatus struct {
 	// +listType=atomic
 	Inventory []InventoryEntry `json:"inventory,omitempty"`
 
+	// Conditions holds the conditions for the Preview.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -103,9 +106,12 @@ type InventoryEntry struct {
 	Retained bool `json:"retained,omitempty"`
 }
 
+// LinkStatus is one of a preview's links.
 type LinkStatus struct {
+	// Name is the link's label.
 	Name string `json:"name"`
-	URL  string `json:"url"`
+	// URL is the link's URL.
+	URL string `json:"url"`
 }
 
 // +kubebuilder:object:root=true
@@ -117,14 +123,16 @@ type LinkStatus struct {
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].message`
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="name must be no more than 63 characters, so it fits in a label"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="metadata.name must be no more than 63 characters"
 
 // Preview is a running instance of a PreviewApp.
 type Preview struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// Spec is the desired state of the Preview.
 	Spec PreviewSpec `json:"spec"`
+	// Status is the observed state of the Preview.
 	// +optional
 	Status PreviewStatus `json:"status,omitempty"`
 }

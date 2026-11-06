@@ -103,6 +103,7 @@ spec:
                     x-kubernetes-map-type: atomic
                 type: object
               apply:
+                description: Apply is how templates are applied.
                 properties:
                   clusterRoleRef:
                     description: ClusterRoleRef names the ClusterRole templates are
@@ -199,10 +200,12 @@ spec:
                   annotations:
                     additionalProperties:
                       type: string
+                    description: Annotations are added to each preview namespace.
                     type: object
                   labels:
                     additionalProperties:
                       type: string
+                    description: Labels are added to each preview namespace.
                     type: object
                 type: object
               networkPolicies:
@@ -211,24 +214,27 @@ spec:
                 items:
                   properties:
                     metadata:
+                      description: Metadata is the NetworkPolicy's metadata.
                       properties:
                         annotations:
                           additionalProperties:
                             type: string
+                          description: Annotations are added to the object.
                           type: object
                         labels:
                           additionalProperties:
                             type: string
+                          description: Labels are added to the object.
                           type: object
                         name:
+                          description: Name is the object's name.
                           minLength: 1
                           type: string
                       required:
                       - name
                       type: object
                     spec:
-                      description: NetworkPolicySpec provides the specification of
-                        a NetworkPolicy
+                      description: Spec is the NetworkPolicy's spec.
                       properties:
                         egress:
                           description: |-
@@ -771,8 +777,10 @@ spec:
                 type: object
             type: object
           status:
+            description: Status is the observed state of the PreviewPolicy.
             properties:
               conditions:
+                description: Conditions holds the conditions for the PreviewPolicy.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -832,12 +840,13 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               observedGeneration:
+                description: ObservedGeneration is the last observed generation.
                 format: int64
                 type: integer
             type: object
         type: object
         x-kubernetes-validations:
-        - message: name must be no more than 63 characters, so it fits in a label
+        - message: metadata.name must be no more than 63 characters
           rule: self.metadata.name.size() <= 63
     served: true
     storage: true

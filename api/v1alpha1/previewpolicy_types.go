@@ -9,6 +9,7 @@ import (
 
 // PreviewPolicySpec holds the settings for preview namespaces. Fields left out are taken from the default PreviewPolicy.
 type PreviewPolicySpec struct {
+	// Apply is how templates are applied.
 	// +optional
 	Apply *ApplySettings `json:"apply,omitempty"`
 
@@ -46,34 +47,43 @@ type APIServerAccess struct {
 }
 
 type NetworkPolicyTemplate struct {
+	// Metadata is the NetworkPolicy's metadata.
 	Metadata TemplateMetadata `json:"metadata"`
 
+	// Spec is the NetworkPolicy's spec.
 	Spec networkingv1.NetworkPolicySpec `json:"spec"`
 }
 
 type TemplateMetadata struct {
+	// Name is the object's name.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
+	// Labels are added to the object.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 
+	// Annotations are added to the object.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 type NamespaceMetadata struct {
+	// Labels are added to each preview namespace.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 
+	// Annotations are added to each preview namespace.
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 type PreviewPolicyStatus struct {
+	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// Conditions holds the conditions for the PreviewPolicy.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -84,7 +94,7 @@ type PreviewPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,categories=kupra
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="name must be no more than 63 characters, so it fits in a label"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="metadata.name must be no more than 63 characters"
 
 // PreviewPolicy holds admin-controlled settings for previews.
 type PreviewPolicy struct {
@@ -92,6 +102,7 @@ type PreviewPolicy struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec PreviewPolicySpec `json:"spec,omitempty"`
+	// Status is the observed state of the PreviewPolicy.
 	// +optional
 	Status PreviewPolicyStatus `json:"status,omitempty"`
 }
