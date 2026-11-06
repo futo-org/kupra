@@ -29,5 +29,5 @@ defaultPolicy:
   resourceQuota:
     hard:
       requests.cpu: "8"
-  networkPolicies: null
+      requests.memory: null
 ```
