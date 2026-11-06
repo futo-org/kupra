@@ -23,18 +23,6 @@ import (
 	"github.com/futo-org/kupra/internal/render"
 )
 
-const (
-	ReasonInvalid             = "Invalid"
-	ReasonCheckFailed         = "CheckFailed"
-	ReasonPolicyNotFound      = "PolicyNotFound"
-	ReasonClusterRoleNotFound = "ClusterRoleNotFound"
-	ReasonNoTemplateRole      = "NoTemplateRole"
-	ReasonCannotBindRole      = "CannotBindRole"
-
-	// LabelAggregateToOperator approves a ClusterRole's rules for kupra. Admins use it to let kupra bind a custom template role.
-	LabelAggregateToOperator = "kupra.futo.tech/aggregate-to-operator"
-)
-
 // recheckInterval is how often failed checks are repeated, since a CRD being installed or a role changing can fix them.
 const recheckInterval = time.Minute
 

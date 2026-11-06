@@ -44,15 +44,6 @@ import (
 )
 
 const (
-	ReasonAppNotFound          = "AppNotFound"
-	ReasonAppNotReady          = "AppNotReady"
-	ReasonNamespaceConflict    = "NamespaceConflict"
-	ReasonNamespaceTerminating = "NamespaceTerminating"
-	ReasonRenderFailed         = "RenderFailed"
-	ReasonApplyFailed          = "ApplyFailed"
-	ReasonTimeout              = "Timeout"
-	ReasonTerminating          = "Terminating"
-
 	// LabelPolicyResource marks the objects kupra creates in a preview namespace from its policy.
 	LabelPolicyResource = "kupra.futo.tech/policy-resource"
 
@@ -132,6 +123,7 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return result, err
 }
 
+// reconcile converges a preview on its rendered template: its policy and namespace first, then captures and resets, its app, its state, and the rest of its workload.
 func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
 	observedGeneration := p.Status.ObservedGeneration
 	p.Status.ObservedGeneration = p.Generation
@@ -146,7 +138,6 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
 	_, settings, err := policy.Resolve(ctx, r.Client, p.Namespace)
 	if reason, ok := policyProblem(err); ok {
 		pending(p, reason, err.Error())
@@ -155,33 +146,14 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	accountName := nsName
 
-	// An existing preview namespace follows its policy even while the app is missing or failing its checks.
 	if namespaceExists {
-		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			// Nothing kupra watches tells it when a conflicting namespace goes away, so check again later.
-			pending(p, reason, message)
-			return ctrl.Result{RequeueAfter: recheckInterval}, nil
+		// An existing preview namespace follows its policy even while the app is missing or failing its checks.
+		if s := r.confineNamespace(ctx, p, nsName, settings); s != nil {
+			return s.result, s.err
 		}
-		// Captures, then resets, come before converging, as in ADR 10.
-		applier, err := r.impersonate(accountName)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if s, err := r.runningCapture(ctx, p); err != nil || s != nil {
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			// Spec changes wait for the capture.
-			p.Status.ObservedGeneration = observedGeneration
-			return r.reconcileCapture(ctx, p, s, applier, nsName)
-		}
-		if resetRequested(p) {
-			return r.reconcileReset(ctx, p, applier, nsName)
+		if s := r.captureOrReset(ctx, p, nsName, observedGeneration); s != nil {
+			return s.result, s.err
 		}
 	} else if resetRequested(p) {
 		// Without a namespace, there's no app or state to remove.
@@ -190,60 +162,30 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 	}
 
-	var app kuprav1alpha1.PreviewApp
-	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.AppRef.Name}, &app); err != nil {
-		if apierrors.IsNotFound(err) {
-			pending(p, ReasonAppNotFound, fmt.Sprintf("PreviewApp %s not found", p.Spec.AppRef.Name))
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, err
+	app, s := r.checkedApp(ctx, p)
+	if s != nil {
+		return s.result, s.err
 	}
-	if c := conditions.Get(&app, meta.ReadyCondition); c == nil || c.ObservedGeneration != app.Generation {
-		// The PreviewApp is watched, so this is retried once it's checked.
-		waitingFor(p, ReasonAppNotReady, fmt.Sprintf("waiting for PreviewApp %s to be checked", app.Name))
-		return ctrl.Result{}, nil
-	} else if c.Status != metav1.ConditionTrue {
-		pending(p, ReasonAppNotReady, fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message))
-		return ctrl.Result{}, nil
-	}
-
 	// Render before creating anything, so a Preview with invalid parameters gets no namespace.
-	compiled, errs := render.Compile(&app.Spec)
-	if len(errs) > 0 {
-		failed(p, ReasonRenderFailed, errs.ToAggregate().Error())
-		return ctrl.Result{}, nil
-	}
-	rendered, err := compiled.Render(render.Preview{
-		Name:        p.Name,
-		Namespace:   nsName,
-		Labels:      p.Labels,
-		Annotations: p.Annotations,
-	}, p.Spec.Parameters)
-	if err != nil {
-		failed(p, ReasonRenderFailed, err.Error())
+	rendered := renderPreview(p, app, nsName)
+	if rendered == nil {
 		return ctrl.Result{}, nil
 	}
 	p.Status.Links = rendered.Links
 
 	if !namespaceExists {
-		if reason, message, err := r.confine(ctx, p, nsName, accountName, settings); err != nil || reason != "" {
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			// Nothing kupra watches tells it when a conflicting namespace goes away, so check again later.
-			pending(p, reason, message)
-			return ctrl.Result{RequeueAfter: recheckInterval}, nil
+		if s := r.confineNamespace(ctx, p, nsName, settings); s != nil {
+			return s.result, s.err
 		}
 		if err := r.bindNamespaceAccess(ctx, p, nsName); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	applier, err := r.impersonate(accountName)
+	applier, err := r.impersonate(nsName)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
 	// State goes first, so it's in place before anything uses it.
 	var states, workload []*unstructured.Unstructured
 	for _, obj := range rendered.Objects {
@@ -253,73 +195,165 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 		}
 		workload = append(workload, obj.Unstructured)
 	}
+	resources := ssa.NewResourceManager(applier, nil, templateOwner)
+	applied, settling, s := r.applyState(ctx, p, app, applier, nsName, resources, states)
+	if s != nil {
+		return s.result, s.err
+	}
+	return r.applyWorkload(ctx, p, app, applier, nsName, resources, workload, applied, settling)
+}
+
+// stop ends a reconciliation early, with its result.
+type stop struct {
+	result ctrl.Result
+	err    error
+}
+
+func stopWith(result ctrl.Result, err error) *stop {
+	return &stop{result: result, err: err}
+}
+
+// confineNamespace applies the policy to a preview's namespace, or marks the preview pending if it can't.
+func (r *PreviewReconciler) confineNamespace(ctx context.Context, p *kuprav1alpha1.Preview, nsName string, settings kuprav1alpha1.PreviewPolicySpec) *stop {
+	reason, message, err := r.confine(ctx, p, nsName, nsName, settings)
+	if err != nil {
+		return stopWith(ctrl.Result{}, err)
+	}
+	if reason != "" {
+		// Nothing kupra watches tells it when a conflicting namespace goes away, so check again later.
+		pending(p, reason, message)
+		return stopWith(ctrl.Result{RequeueAfter: recheckInterval}, nil)
+	}
+	return nil
+}
+
+// captureOrReset continues a started capture, or else a requested reset, which come before converging, as in ADR 10.
+func (r *PreviewReconciler) captureOrReset(ctx context.Context, p *kuprav1alpha1.Preview, nsName string, observedGeneration int64) *stop {
+	applier, err := r.impersonate(nsName)
+	if err != nil {
+		return stopWith(ctrl.Result{}, err)
+	}
+	s, err := r.runningCapture(ctx, p)
+	if err != nil {
+		return stopWith(ctrl.Result{}, err)
+	}
+	if s != nil {
+		// Spec changes wait for the capture.
+		p.Status.ObservedGeneration = observedGeneration
+		return stopWith(r.reconcileCapture(ctx, p, s, applier, nsName))
+	}
+	if resetRequested(p) {
+		return stopWith(r.reconcileReset(ctx, p, applier, nsName))
+	}
+	return nil
+}
+
+// checkedApp returns the preview's PreviewApp once it has passed its checks.
+func (r *PreviewReconciler) checkedApp(ctx context.Context, p *kuprav1alpha1.Preview) (*kuprav1alpha1.PreviewApp, *stop) {
+	var app kuprav1alpha1.PreviewApp
+	if err := r.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Spec.AppRef.Name}, &app); err != nil {
+		if apierrors.IsNotFound(err) {
+			pending(p, ReasonAppNotFound, fmt.Sprintf("PreviewApp %s not found", p.Spec.AppRef.Name))
+			return nil, stopWith(ctrl.Result{}, nil)
+		}
+		return nil, stopWith(ctrl.Result{}, err)
+	}
+	c := conditions.Get(&app, meta.ReadyCondition)
+	if c == nil || c.ObservedGeneration != app.Generation {
+		// The PreviewApp is watched, so this is retried once it's checked.
+		waitingFor(p, ReasonAppNotReady, fmt.Sprintf("waiting for PreviewApp %s to be checked", app.Name))
+		return nil, stopWith(ctrl.Result{}, nil)
+	}
+	if c.Status != metav1.ConditionTrue {
+		pending(p, ReasonAppNotReady, fmt.Sprintf("PreviewApp %s failed its checks: %s", app.Name, c.Message))
+		return nil, stopWith(ctrl.Result{}, nil)
+	}
+	return &app, nil
+}
+
+// renderPreview renders the app's template for the preview, or marks the preview failed and returns nil.
+func renderPreview(p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, nsName string) *render.Result {
+	compiled, errs := render.Compile(&app.Spec)
+	if len(errs) > 0 {
+		failed(p, ReasonRenderFailed, errs.ToAggregate().Error())
+		return nil
+	}
+	rendered, err := compiled.Render(render.Preview{
+		Name:        p.Name,
+		Namespace:   nsName,
+		Labels:      p.Labels,
+		Annotations: p.Annotations,
+	}, p.Spec.Parameters)
+	if err != nil {
+		failed(p, ReasonRenderFailed, err.Error())
+		return nil
+	}
+	return rendered
+}
+
+// applyState restores and applies the preview's state resources, and waits until they're ready. It returns what it applied, and whether a restore is still settling.
+func (r *PreviewReconciler) applyState(ctx context.Context, p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, applier client.Client, nsName string, resources *ssa.ResourceManager, states []*unstructured.Unstructured) ([]kuprav1alpha1.InventoryEntry, bool, *stop) {
 	plan, reason, message, err := r.restoreState(ctx, p, applier, nsName, states)
 	if err != nil {
-		return ctrl.Result{}, err
+		return nil, false, stopWith(ctrl.Result{}, err)
 	}
 	switch reason {
 	case "":
 	case ReasonSnapshotNotReady:
 		// PreviewSnapshots are watched, so this is retried when its capture finishes.
 		waitingFor(p, reason, message)
-		return ctrl.Result{}, nil
+		return nil, false, stopWith(ctrl.Result{}, nil)
 	case ReasonSnapshotNotFound, ReasonSnapshotUnusable:
 		// PreviewSnapshots are watched, so this is retried when one changes.
 		pending(p, reason, message)
-		return ctrl.Result{}, nil
+		return nil, false, stopWith(ctrl.Result{}, nil)
 	default:
 		failed(p, reason, message)
-		return ctrl.Result{}, nil
+		return nil, false, stopWith(ctrl.Result{}, nil)
 	}
 
-	restored := plan.resources
-	resources := ssa.NewResourceManager(applier, nil, templateOwner)
-	applied, err := applyAll(ctx, resources, p, restored, true)
-	var restoreSettling bool
+	applied, err := applyAll(ctx, resources, p, plan.resources, true)
+	var settling bool
 	if err == nil {
-		restoreSettling, err = r.recordRestore(ctx, p, applier, plan)
+		settling, err = r.recordRestore(ctx, p, applier, plan)
 	}
-	if err == nil && !plan.done {
+	if err != nil {
+		return applied, false, stopWith(applyFailed(p, app, applied, err))
+	}
+	if !plan.done {
 		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
 		message := "restoring state"
 		if len(plan.waiting) > 0 {
 			message += ": " + strings.Join(plan.waiting, "; ")
 		}
 		provisioning(p, message)
-		stallAfterTimeout(p, &app, message)
+		stallAfterTimeout(p, app, message)
 		// Restore copies are bound within moments, and kupra doesn't watch them.
-		return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+		return applied, false, stopWith(ctrl.Result{RequeueAfter: nextStepInterval}, nil)
 	}
-	if err == nil {
-		var ready bool
-		var message string
-		ready, message, err = readiness(ctx, applier, restored)
-		if err == nil && !ready {
-			p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
-			provisioning(p, message)
-			stallAfterTimeout(p, &app, message)
-			return ctrl.Result{RequeueAfter: startingInterval}, nil
-		}
+	ready, message, err := readiness(ctx, applier, plan.resources)
+	if err != nil {
+		return applied, false, stopWith(applyFailed(p, app, applied, err))
 	}
-	if err == nil {
-		var appliedWorkload []kuprav1alpha1.InventoryEntry
-		appliedWorkload, err = applyAll(ctx, resources, p, workload, false)
-		applied = append(applied, appliedWorkload...)
+	if !ready {
+		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
+		provisioning(p, message)
+		stallAfterTimeout(p, app, message)
+		return applied, false, stopWith(ctrl.Result{RequeueAfter: startingInterval}, nil)
 	}
+	return applied, settling, nil
+}
+
+// applyWorkload applies the rest of the template once the state is ready, prunes what it no longer has, and reports whether it's running.
+func (r *PreviewReconciler) applyWorkload(ctx context.Context, p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, applier client.Client, nsName string, resources *ssa.ResourceManager, workload []*unstructured.Unstructured, applied []kuprav1alpha1.InventoryEntry, settling bool) (ctrl.Result, error) {
+	appliedWorkload, err := applyAll(ctx, resources, p, workload, false)
+	applied = append(applied, appliedWorkload...)
 	var retained []kuprav1alpha1.InventoryEntry
 	if err == nil {
 		retained, err = r.prune(ctx, resources, p, nsName, p.Status.Inventory, applied)
 	}
 	if err != nil {
-		p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
-		// An object the API server rejects as invalid stays invalid until the template or parameters change, and those changes requeue the preview.
-		if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
-			failed(p, ReasonApplyFailed, err.Error())
-			return ctrl.Result{RequeueAfter: runningInterval}, nil
-		}
-		starting(p, ReasonApplyFailed, err.Error())
-		stallAfterTimeout(p, &app, err.Error())
-		return ctrl.Result{}, err
+		return applyFailed(p, app, applied, err)
 	}
 	p.Status.Inventory = unionInventory(applied, retained)
 
@@ -327,21 +361,34 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if ready {
-		running(p)
-		if started, err := r.startCapture(ctx, p, &app); err != nil {
-			return ctrl.Result{}, err
-		} else if started {
-			return ctrl.Result{RequeueAfter: nextStepInterval}, nil
-		}
-		if restoreSettling {
-			return ctrl.Result{RequeueAfter: startingInterval}, nil
-		}
+	if !ready {
+		starting(p, meta.ProgressingReason, message)
+		stallAfterTimeout(p, app, message)
+		return ctrl.Result{RequeueAfter: startingInterval}, nil
+	}
+	running(p)
+	if started, err := r.startCapture(ctx, p, app); err != nil {
+		return ctrl.Result{}, err
+	} else if started {
+		return ctrl.Result{RequeueAfter: nextStepInterval}, nil
+	}
+	if settling {
+		return ctrl.Result{RequeueAfter: startingInterval}, nil
+	}
+	return ctrl.Result{RequeueAfter: runningInterval}, nil
+}
+
+// applyFailed records what was applied before err, and whether retrying can help.
+func applyFailed(p *kuprav1alpha1.Preview, app *kuprav1alpha1.PreviewApp, applied []kuprav1alpha1.InventoryEntry, err error) (ctrl.Result, error) {
+	p.Status.Inventory = unionInventory(applied, p.Status.Inventory)
+	// An object the API server rejects as invalid stays invalid until the template or parameters change, and those changes requeue the preview.
+	if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
+		failed(p, ReasonApplyFailed, err.Error())
 		return ctrl.Result{RequeueAfter: runningInterval}, nil
 	}
-	starting(p, meta.ProgressingReason, message)
-	stallAfterTimeout(p, &app, message)
-	return ctrl.Result{RequeueAfter: startingInterval}, nil
+	starting(p, ReasonApplyFailed, err.Error())
+	stallAfterTimeout(p, app, err.Error())
+	return ctrl.Result{}, err
 }
 
 // stallAfterTimeout marks a preview as stalled once it has been reconciling for longer than its app's timeout. kupra keeps trying regardless.

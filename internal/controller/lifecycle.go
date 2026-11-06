@@ -32,20 +32,8 @@ const (
 	// AnnotationResetRequestedAt requests a reset whenever it's set to a new value.
 	AnnotationResetRequestedAt = "kupra.futo.tech/reset-requested-at"
 
-	// ConditionRestored is true once a preview's state has started, empty or from a snapshot.
-	ConditionRestored = "Restored"
-
 	// captureTimeout is how long a capture may take before it fails.
 	captureTimeout = 30 * time.Minute
-
-	ReasonCapturing        = "Capturing"
-	ReasonResetting        = "Resetting"
-	ReasonSnapshotNotFound = "SnapshotNotFound"
-	ReasonSnapshotNotReady = "SnapshotNotReady"
-	ReasonSnapshotUnusable = "SnapshotUnusable"
-	ReasonRestoreFailed    = "RestoreFailed"
-	ReasonCaptureFailed    = "CaptureFailed"
-	ReasonWaiting          = "Waiting"
 )
 
 // +kubebuilder:rbac:groups=kupra.futo.tech,resources=previewsnapshots,verbs=get;list;watch;update;patch
