@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -97,9 +98,16 @@ func run(m *testing.M) int {
 	return m.Run()
 }
 
+// holdRestoreCopies stops bindRestoreCopies, for tests of restores that wait.
+var holdRestoreCopies atomic.Bool
+
 // bindRestoreCopies plays the snapshot controller for restore copies, which kupra waits for before it creates what's restored from them. Tests bind other VolumeSnapshots themselves.
 func bindRestoreCopies(ctx context.Context) {
 	for ctx.Err() == nil {
+		if holdRestoreCopies.Load() {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
 		var list snapshotv1.VolumeSnapshotList
 		if err := k8s.List(ctx, &list, client.HasLabels{controller.LabelPreviewUID}); err == nil {
 			for i := range list.Items {

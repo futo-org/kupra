@@ -27,9 +27,10 @@ const (
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;list;create;patch;delete
 // +kubebuilder:rbac:groups=postgresql.cnpg.io,resources=backups,verbs=get;create;patch;delete
 
-// runKind calls a kind with the objects it asked to read, applying and deleting what it asks for, until it's done, fails, or asks for nothing new. This is how Crossplane calls composition functions that require extra resources. Objects in ownedNamespace get owner as their owner.
+// runKind calls a kind with the objects it asked to read, applying and deleting what it asks for, until it's done, fails, or its writes change nothing it reads. This is how Crossplane calls composition functions that require extra resources. Objects in ownedNamespace get owner as their owner. If the kind isn't done, its last response says what it's waiting for.
 func (r *PreviewReconciler) runKind(ctx context.Context, call func(state.Observed) state.Response, ownedNamespace string, owner *metav1.OwnerReference) (state.Response, error) {
 	observed := state.Observed{}
+	var last state.Response
 	for range maxKindRounds {
 		resp := call(observed)
 		if resp.Failed != "" {
@@ -64,12 +65,14 @@ func (r *PreviewReconciler) runKind(ctx context.Context, call func(state.Observe
 				next[ref] = live
 			}
 		}
-		if len(resp.Apply) == 0 && len(resp.Delete) == 0 && sameObserved(observed, next) {
+		// Applying the same objects again changes nothing, so calling the kind again would only repeat this round.
+		if sameObserved(observed, next) {
 			return resp, nil
 		}
 		observed = next
+		last = resp
 	}
-	return state.Response{}, nil
+	return last, nil
 }
 
 func refObject(ref state.Ref) *unstructured.Unstructured {
