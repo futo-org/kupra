@@ -8,7 +8,9 @@ k() { kubectl --context kind-kupra-e2e "$@"; }
 k get previewapps,previews,previewsnapshots,clusters.postgresql.cnpg.io,backups.postgresql.cnpg.io,volumesnapshots,pods,pvc -A -o wide
 k get events -A --sort-by=.lastTimestamp
 # Deletion times, finalizers and conditions show what's holding up a deletion.
-k get namespaces -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,CONDITIONS:.status.conditions
+k get namespaces -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,FINALIZERS:.spec.finalizers,CONDITIONS:.status.conditions
+# The namespace controller's view, for namespaces that don't finish deleting.
+k -n kube-system logs -l component=kube-controller-manager --tail=-1 | grep -iE 'namespace|e2e-' | tail -100
 k get previews,clusters.postgresql.cnpg.io,pvc,volumesnapshots,volumesnapshotcontents -A \
   -o custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers
 k get previews,previewsnapshots -A -o custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,CONDITIONS:.status.conditions
