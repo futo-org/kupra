@@ -25,6 +25,14 @@ rules:
   - patch
   - watch
 - apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - kupra.futo.tech
   resources:
   - previewapps

@@ -17,6 +17,10 @@ type PreviewPolicySpec struct {
 	// +listType=atomic
 	NetworkPolicies []NetworkPolicyTemplate `json:"networkPolicies"`
 
+	// APIServerAccess lets some pods in each preview namespace reach the Kubernetes API server, which NetworkPolicies can only allow by address. kupra creates the NetworkPolicy kupra-api-server with the addresses and ports of the kubernetes Service's endpoints, and keeps them up to date.
+	// +optional
+	APIServerAccess *APIServerAccess `json:"apiServerAccess,omitempty"`
+
 	// ResourceQuota is created in each preview namespace.
 	// +optional
 	ResourceQuota *corev1.ResourceQuotaSpec `json:"resourceQuota,omitempty"`
@@ -33,6 +37,12 @@ type PreviewPolicySpec struct {
 type ApplySettings struct {
 	// ClusterRoleRef names the ClusterRole templates are applied with.
 	ClusterRoleRef meta.LocalObjectReference `json:"clusterRoleRef"`
+}
+
+type APIServerAccess struct {
+	// PodSelector selects the pods that may reach the API server. An empty selector selects all pods, and leaving it out selects none.
+	// +optional
+	PodSelector *metav1.LabelSelector `json:"podSelector,omitempty"`
 }
 
 type NetworkPolicyTemplate struct {

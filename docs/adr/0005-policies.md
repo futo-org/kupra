@@ -52,6 +52,11 @@ spec:
                   except:
                     - fc00::/7
                     - fe80::/10
+  apiServerAccess:
+    podSelector:
+      matchExpressions:
+        - key: cnpg.io/cluster
+          operator: Exists
   resourceQuota:
     hard:
       requests.cpu: "4"
@@ -72,6 +77,7 @@ spec:
 
 - **`apply.clusterRoleRef`** names the ClusterRole that templates are applied with. kupra binds it, within each preview namespace, to the account it applies templates as.
 - **`networkPolicies`**, **`resourceQuota`** and **`limitRange`** are created in each preview namespace as written. A quota counts what pods request, and is checked when pods are created. It doesn't reserve capacity or cap actual usage, which is what the limit range's default limits are for.
+- **`apiServerAccess`** lets the pods it selects reach the Kubernetes API server, which some operators' pods need, such as CloudNativePG's. NetworkPolicies can only allow the API server by address, which differs between clusters and can change, so kupra writes that NetworkPolicy itself, from the `kubernetes` Service's endpoints.
 - **`namespaceMetadata`** adds labels and annotations to preview namespaces. That covers Pod Security admission, which is configured by namespace labels, and labels that shared infrastructure or other tools select namespaces by.
 
 kupra's chart installs the `default` policy with every setting spelled out, like the example above. Admins change the defaults through the chart's values, so upgrades keep their changes. Other policies fall back to `default` for any field they leave out, one level deep. Labels and annotations are merged, with the policy's own over `default`'s, so adding an unrelated label doesn't drop Pod Security's `enforce: baseline`. Loosening a setting, for example with an empty list of network policies, takes an explicit choice.

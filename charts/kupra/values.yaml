@@ -53,20 +53,11 @@ defaultPolicy:
                   except:
                     - fc00::/7
                     - fe80::/10
-    - metadata:
-        name: allow-cnpg-api-server
-      spec:
-        podSelector:
-          matchExpressions:
-            - key: cnpg.io/cluster
-              operator: Exists
-        policyTypes: [Egress]
-        egress:
-          - ports:
-              - protocol: TCP
-                port: 443
-              - protocol: TCP
-                port: 6443
+  apiServerAccess:
+    podSelector:
+      matchExpressions:
+        - key: cnpg.io/cluster
+          operator: Exists
   resourceQuota:
     hard:
       requests.cpu: "4"

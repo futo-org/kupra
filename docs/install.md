@@ -34,8 +34,4 @@ defaultPolicy:
 
 ## CloudNativePG
 
-CloudNativePG's pods talk to the Kubernetes API server, which the default `restrict-egress` NetworkPolicy blocks when it's on a private address. The default PreviewPolicy's `allow-cnpg-api-server` NetworkPolicy lets them reach any address on TCP ports 443 and 6443, where API servers usually listen. If yours listens on another port, change that policy's ports. Find the port with:
-
-```sh
-kubectl get endpointslices --namespace default --selector kubernetes.io/service-name=kubernetes
-```
+CloudNativePG's pods talk to the Kubernetes API server, which the default `restrict-egress` NetworkPolicy blocks when it's on a private address. NetworkPolicies can only allow the API server by address, so the default PreviewPolicy's `apiServerAccess` has kupra do it: it creates the NetworkPolicy `kupra-api-server` in each preview namespace, which lets pods with a `cnpg.io/cluster` label reach the addresses and ports of the `kubernetes` Service's endpoints, and keeps it up to date.

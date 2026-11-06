@@ -11,6 +11,7 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -123,6 +124,18 @@ template:
 	}
 	markClusterReady(t, sourceNS, "database")
 	waitForPhase(t, "cnpg", "source", kuprav1alpha1.PreviewRunning, "Succeeded")
+
+	// The default policy lets CloudNativePG's pods reach the API server at its endpoints' addresses.
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: sourceNS, Name: "kupra-api-server"}, &np); err != nil {
+		t.Fatal(err)
+	}
+	if len(np.Spec.Egress) != 1 || len(np.Spec.Egress[0].To) == 0 || np.Spec.Egress[0].To[0].IPBlock == nil || len(np.Spec.Egress[0].Ports) == 0 {
+		t.Errorf("API server policy egress = %+v, want the API server's addresses and ports", np.Spec.Egress)
+	}
+	if len(np.Spec.PodSelector.MatchExpressions) != 1 || np.Spec.PodSelector.MatchExpressions[0].Key != "cnpg.io/cluster" {
+		t.Errorf("API server policy selects %+v, want CloudNativePG's pods", np.Spec.PodSelector)
+	}
 
 	snap := &kuprav1alpha1.PreviewSnapshot{
 		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "cnpg"},
