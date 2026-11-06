@@ -5,10 +5,8 @@ set -euo pipefail
 
 base="${usage_base:-$(git merge-base origin/main HEAD)}"
 workdir="$(mktemp -d)"
-trap 'git worktree remove --force "$workdir/base" >/dev/null 2>&1; rm -rf "$workdir"' EXIT
+trap 'git worktree remove --force "$workdir" >/dev/null 2>&1; rm -rf "$workdir"' EXIT
 
-git worktree add --quiet --detach "$workdir/base" "$base"
-render() { helm template kupra "$1/charts/kupra" --namespace kupra-system --include-crds; }
-render "$workdir/base" >"$workdir/base.yaml"
-render . >"$workdir/head.yaml"
-diff -u --label "$base" --label "HEAD" "$workdir/base.yaml" "$workdir/head.yaml" || true
+git worktree add --quiet --detach "$workdir" "$base"
+helm diff local "$workdir/charts/kupra" charts/kupra \
+  --release kupra --namespace kupra-system --include-crds --no-color
