@@ -2,6 +2,8 @@ package state
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -149,4 +151,26 @@ func snapshotRef(name string) corev1.TypedLocalObjectReference {
 // isSnapshot reports whether a capture's data is a VolumeSnapshot.
 func isSnapshot(ref corev1.TypedLocalObjectReference) bool {
 	return ref.Kind == volumeSnapshotGVK.Kind && ref.APIGroup != nil && *ref.APIGroup == volumeSnapshotGVK.Group
+}
+
+// allReady reports whether the VolumeSnapshots at refs all exist, whether they're all ready to use, and if not, what they're waiting for.
+func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed string) {
+	var messages []string
+	ready = true
+	for _, ref := range refs {
+		obj := observed[ref]
+		if obj == nil {
+			return false, false, "", ""
+		}
+		r, w, failed := readyToUse(obj)
+		if failed != "" {
+			return false, false, "", failed
+		}
+		ready = ready && r
+		if w != "" {
+			messages = append(messages, w)
+		}
+	}
+	slices.Sort(messages)
+	return true, ready, strings.Join(messages, "; "), ""
 }

@@ -165,6 +165,7 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 
 	var source cnpgv1.DataSource
 	var copies []*unstructured.Unstructured
+	var copyRefs []Ref
 	for _, role := range roles(c) {
 		b := bound[role]
 		if b == nil {
@@ -175,6 +176,7 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 		snapshot := metav1.ObjectMeta{Name: name, Namespace: c.GetNamespace(), Labels: cnpgMetadata(b.snapshot.Labels), Annotations: cnpgMetadata(b.snapshot.Annotations)}
 		maps.Copy(snapshot.Labels, req.Labels)
 		copies = append(copies, bind(b.content, req.Names.ClusterName("restore-"+nameFor(role)), snapshot, snapshotv1.VolumeSnapshotContentRetain, req.Labels)...)
+		copyRefs = append(copyRefs, Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: snapshot.Namespace, Name: name})
 		ref := snapshotRef(name)
 		if role == cnpgutils.PVCRolePgWal {
 			source.WalStorage = &ref
@@ -195,6 +197,12 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 	}
 	if err := unstructured.SetNestedMap(c.Object, bootstrap, "spec", "bootstrap"); err != nil {
 		return Response{Failed: err.Error()}
+	}
+	// CloudNativePG's first recovery attempt fails on copies that aren't bound yet, so the cluster waits for them.
+	if _, ready, waiting, failed := allReady(copyRefs, req.Observed); failed != "" {
+		return Response{Failed: failed}
+	} else if !ready {
+		return Response{Apply: copies, Observe: append(observe, copyRefs...), Waiting: waiting}
 	}
 	return Response{Resource: c, Apply: copies, Done: true}
 }
@@ -311,28 +319,6 @@ func (cnpgCluster) Capture(req CaptureRequest) Response {
 		observe = append(observe, o...)
 	}
 	return Response{Apply: apply, Observe: observe}
-}
-
-// allReady reports whether the VolumeSnapshots at refs all exist, whether they're all ready to use, and if not, what they're waiting for.
-func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed string) {
-	var messages []string
-	ready = true
-	for _, ref := range refs {
-		obj := observed[ref]
-		if obj == nil {
-			return false, false, "", ""
-		}
-		r, w, failed := readyToUse(obj)
-		if failed != "" {
-			return false, false, "", failed
-		}
-		ready = ready && r
-		if w != "" {
-			messages = append(messages, w)
-		}
-	}
-	slices.Sort(messages)
-	return true, ready, strings.Join(messages, "; "), ""
 }
 
 // roleOf returns the role of a VolumeSnapshot CloudNativePG took. It's in an annotation, and in a label on snapshots of older versions, which CloudNativePG reads first.

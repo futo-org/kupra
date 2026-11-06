@@ -92,8 +92,27 @@ func run(m *testing.M) int {
 			fmt.Fprintf(os.Stderr, "running manager: %v\n", err)
 		}
 	}()
+	go bindRestoreCopies(ctx)
 
 	return m.Run()
+}
+
+// bindRestoreCopies plays the snapshot controller for restore copies, which kupra waits for before it creates what's restored from them. Tests bind other VolumeSnapshots themselves.
+func bindRestoreCopies(ctx context.Context) {
+	for ctx.Err() == nil {
+		var list snapshotv1.VolumeSnapshotList
+		if err := k8s.List(ctx, &list, client.HasLabels{controller.LabelPreviewUID}); err == nil {
+			for i := range list.Items {
+				vs := &list.Items[i]
+				if vs.Status != nil || vs.Spec.Source.VolumeSnapshotContentName == nil {
+					continue
+				}
+				vs.Status = &snapshotv1.VolumeSnapshotStatus{BoundVolumeSnapshotContentName: vs.Spec.Source.VolumeSnapshotContentName, ReadyToUse: ptr(true)}
+				_ = k8s.Status().Update(ctx, vs)
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // apply server-side applies the YAML documents in a file.

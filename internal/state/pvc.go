@@ -62,6 +62,13 @@ func (persistentVolumeClaim) Restore(req RestoreRequest) Response {
 	if err := atLeast(claim, bound.snapshot.Status.RestoreSize, "spec", "resources", "requests", "storage"); err != nil {
 		return Response{Failed: err.Error()}
 	}
+	// The provisioner's first attempt fails on a copy that isn't bound yet, so the claim waits for it.
+	copyRef := Ref{GroupVersionKind: volumeSnapshotGVK, Namespace: namespace, Name: name}
+	if _, ready, waiting, failed := allReady([]Ref{copyRef}, req.Observed); failed != "" {
+		return Response{Failed: failed}
+	} else if !ready {
+		return Response{Apply: copied, Observe: append(observe, copyRef), Waiting: waiting}
+	}
 	return Response{Resource: claim, Apply: copied, Done: true}
 }
 

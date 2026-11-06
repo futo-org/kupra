@@ -255,20 +255,7 @@ func TestClusterRestore(t *testing.T) {
 		Names:  names.ForResource("pr-1", "uid", clusterGK, "database"),
 		Labels: map[string]string{"kupra.futo.tech/preview-uid": "uid"},
 	}
-	var resp Response
-	for range 4 {
-		resp = kind.Restore(req)
-		if resp.Failed != "" {
-			t.Fatal(resp.Failed)
-		}
-		if resp.Done {
-			break
-		}
-		req.Observed = c.step(resp)
-	}
-	if !resp.Done {
-		t.Fatal("restore isn't done")
-	}
+	resp := restore(t, kind, &req, c)
 	c.step(resp)
 
 	sources, _, _ := unstructured.NestedMap(resp.Resource.Object, "spec", "bootstrap")
@@ -324,16 +311,7 @@ func TestClusterRestoreWithoutWALStorage(t *testing.T) {
 		From:     &Source{Namespace: "preview", Data: []corev1.TypedLocalObjectReference{{APIGroup: &group, Kind: "VolumeSnapshot", Name: "data"}}},
 		Names:    names.ForResource("pr-1", "uid", clusterGK, "database"),
 	}
-	var resp Response
-	for range 4 {
-		if resp = kind.Restore(req); resp.Done || resp.Failed != "" {
-			break
-		}
-		req.Observed = c.step(resp)
-	}
-	if !resp.Done {
-		t.Fatalf("restore = %+v, want it done", resp)
-	}
+	resp := restore(t, kind, &req, c)
 	if _, ok, _ := unstructured.NestedMap(resp.Resource.Object, "spec", "bootstrap", "recovery", "volumeSnapshots", "walStorage"); ok {
 		t.Error("recovery has WAL storage the cluster doesn't")
 	}

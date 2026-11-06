@@ -220,20 +220,7 @@ status: {snapshotHandle: handle-2, readyToUse: true}
 		Names:    names.ForResource("pr-1", "uid", claimGK, "data"),
 		Labels:   map[string]string{"kupra.futo.tech/preview-uid": "uid"},
 	}
-	var resp Response
-	for range 4 {
-		resp = kind.Restore(req)
-		if resp.Failed != "" {
-			t.Fatal(resp.Failed)
-		}
-		if resp.Done {
-			break
-		}
-		req.Observed = c.step(resp)
-	}
-	if !resp.Done {
-		t.Fatal("restore isn't done")
-	}
+	resp := restore(t, kind, &req, c)
 	c.step(resp)
 
 	restored := c.find("VolumeSnapshot", "preview")
@@ -326,4 +313,39 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 	if got := c[contentRef].GetLabels()["kupra.futo.tech/snapshot-uid"]; got != "uid" {
 		t.Errorf("source content's label = %q, want it labelled even though it was already retained", got)
 	}
+}
+
+// restore calls a kind's Restore until it's done, playing the snapshot controller, which binds the restore copies a call applies before the next call. It fails the test if the kind is done before the copies it applies are bound.
+func restore(t *testing.T, kind Kind, req *RestoreRequest, c cluster) Response {
+	t.Helper()
+	for range 8 {
+		resp := kind.Restore(*req)
+		if resp.Failed != "" {
+			t.Fatal(resp.Failed)
+		}
+		var copies []Ref
+		for _, obj := range resp.Apply {
+			if obj.GetKind() == volumeSnapshotGVK.Kind {
+				copies = append(copies, RefOf(obj))
+			}
+		}
+		if resp.Done {
+			for _, ref := range copies {
+				if ready, _, _ := unstructured.NestedBool(c[ref].Object, "status", "readyToUse"); c[ref] == nil || !ready {
+					t.Errorf("restore is done before its copy %s is bound", ref.Name)
+				}
+			}
+			return resp
+		}
+		if resp.Resource != nil {
+			t.Errorf("restore returned %s before it's done", resp.Resource.GetName())
+		}
+		c.step(resp)
+		for _, ref := range copies {
+			_ = unstructured.SetNestedField(c[ref].Object, true, "status", "readyToUse")
+		}
+		req.Observed = c.step(Response{Observe: resp.Observe})
+	}
+	t.Fatal("restore isn't done")
+	return Response{}
 }
