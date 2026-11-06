@@ -43,8 +43,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: PreviewPolicySpec holds the settings for preview namespaces.
-              Fields left out are taken from the default PreviewPolicy.
+            description: Spec is the settings for preview namespaces.
             properties:
               apiServerAccess:
                 description: APIServerAccess lets some pods in each preview namespace
@@ -103,6 +102,7 @@ spec:
                     x-kubernetes-map-type: atomic
                 type: object
               apply:
+                description: Apply is how templates are applied in preview namespaces.
                 properties:
                   clusterRoleRef:
                     description: ClusterRoleRef names the ClusterRole templates are
@@ -199,10 +199,12 @@ spec:
                   annotations:
                     additionalProperties:
                       type: string
+                    description: Annotations are added to each preview namespace.
                     type: object
                   labels:
                     additionalProperties:
                       type: string
+                    description: Labels are added to each preview namespace.
                     type: object
                 type: object
               networkPolicies:
@@ -211,24 +213,28 @@ spec:
                 items:
                   properties:
                     metadata:
+                      description: Metadata is the NetworkPolicy's name, labels and
+                        annotations.
                       properties:
                         annotations:
                           additionalProperties:
                             type: string
+                          description: Annotations are added to the object.
                           type: object
                         labels:
                           additionalProperties:
                             type: string
+                          description: Labels are added to the object.
                           type: object
                         name:
+                          description: Name is the object's name in each preview namespace.
                           minLength: 1
                           type: string
                       required:
                       - name
                       type: object
                     spec:
-                      description: NetworkPolicySpec provides the specification of
-                        a NetworkPolicy
+                      description: Spec is the NetworkPolicy's spec.
                       properties:
                         egress:
                           description: |-
@@ -771,8 +777,11 @@ spec:
                 type: object
             type: object
           status:
+            description: Status says whether previews can use the policy.
             properties:
               conditions:
+                description: Conditions say whether previews can use the policy (Ready),
+                  and if not, why (Stalled).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -832,12 +841,13 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               observedGeneration:
+                description: ObservedGeneration is the generation the status describes.
                 format: int64
                 type: integer
             type: object
         type: object
         x-kubernetes-validations:
-        - message: name must be no more than 63 characters, so it fits in a label
+        - message: metadata.name must be no more than 63 characters
           rule: self.metadata.name.size() <= 63
     served: true
     storage: true

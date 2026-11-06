@@ -30,6 +30,7 @@ type PreviewAppSpec struct {
 	// +kubebuilder:validation:Pattern="^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
+	// Template is what each preview runs.
 	Template Template `json:"template"`
 }
 
@@ -48,13 +49,17 @@ const (
 )
 
 type Parameter struct {
+	// Name is how expressions refer to the parameter, as in parameters.<name>, and the key of its value in a Preview.
 	Name Identifier `json:"name"`
 
+	// Title is the parameter's label in the dashboard.
 	Title string `json:"title"`
 
+	// Description is shown with the parameter in the dashboard.
 	// +optional
 	Description string `json:"description,omitempty"`
 
+	// Type is what kind of value the parameter takes. Expressions see it as that type.
 	// +optional
 	// +kubebuilder:default=string
 	Type ParameterType `json:"type,omitempty"`
@@ -68,6 +73,7 @@ type Parameter struct {
 	// +optional
 	Default *string `json:"default,omitempty"`
 
+	// Required parameters must be given a value by each Preview.
 	// +optional
 	Required bool `json:"required,omitempty"`
 
@@ -81,8 +87,9 @@ type UIHintType string
 
 const UIHintImageTag UIHintType = "imageTag"
 
-// +kubebuilder:validation:XValidation:rule="self.type == 'imageTag' ? has(self.imageTag) : !has(self.imageTag)",message="imageTag must be set if and only if type is imageTag"
+// +kubebuilder:validation:XValidation:rule="self.type == 'imageTag' ? has(self.imageTag) : !has(self.imageTag)",message="imageTag must be set when type is imageTag, and only then"
 type UIHint struct {
+	// Type is the kind of input the dashboard shows.
 	Type UIHintType `json:"type"`
 
 	// ImageTag configures the imageTag hint.
@@ -96,6 +103,7 @@ type ImageTagHint struct {
 }
 
 type Variable struct {
+	// Name is how expressions refer to the variable, as in variables.<name>.
 	Name Identifier `json:"name"`
 
 	// Expression is a CEL expression.
@@ -103,6 +111,7 @@ type Variable struct {
 }
 
 type Link struct {
+	// Name is the link's label.
 	Name string `json:"name"`
 
 	// URLExpr is a CEL expression that evaluates to the link's URL.
@@ -116,9 +125,11 @@ type Template struct {
 }
 
 type PreviewAppStatus struct {
+	// ObservedGeneration is the generation the status describes.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
+	// Conditions say whether the app passed its checks (Ready), and if not, why (Stalled).
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -131,14 +142,16 @@ type PreviewAppStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].message`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="name must be no more than 63 characters, so it fits in a label"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="metadata.name must be no more than 63 characters"
 
 // PreviewApp describes how to run an app as a preview.
 type PreviewApp struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// Spec describes the app.
 	Spec PreviewAppSpec `json:"spec"`
+	// Status says whether the app passed its checks.
 	// +optional
 	Status PreviewAppStatus `json:"status,omitempty"`
 }

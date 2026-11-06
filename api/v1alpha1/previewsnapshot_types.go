@@ -7,6 +7,7 @@ import (
 )
 
 type PreviewSnapshotSpec struct {
+	// Source is the preview to capture.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="source is immutable"
 	Source SnapshotSource `json:"source"`
 
@@ -41,6 +42,7 @@ const (
 )
 
 type PreviewSnapshotStatus struct {
+	// ObservedGeneration is the generation the status describes.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
@@ -69,9 +71,11 @@ type PreviewSnapshotStatus struct {
 	// +listType=atomic
 	Captures []Capture `json:"captures,omitempty"`
 
+	// ReadyToUse is set once the capture succeeded, and previews can start from the snapshot.
 	// +optional
 	ReadyToUse bool `json:"readyToUse,omitempty"`
 
+	// Conditions say whether the snapshot is ready (Ready), still capturing or held from deletion (Reconciling), or failed (Stalled).
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -80,10 +84,12 @@ type PreviewSnapshotStatus struct {
 
 // Capture is a captured state resource.
 type Capture struct {
-	// +optional
+	// Group is the resource's API group, empty for the core group.
 	Group string `json:"group"`
-	Kind  string `json:"kind"`
-	Name  string `json:"name"`
+	// Kind is the resource's kind.
+	Kind string `json:"kind"`
+	// Name is the resource's name in the preview's template, which a restored resource is matched to.
+	Name string `json:"name"`
 	// Data are the objects in the snapshot's namespace that hold the capture, such as VolumeSnapshots.
 	// +listType=atomic
 	Data []corev1.TypedLocalObjectReference `json:"data"`
@@ -103,7 +109,9 @@ type PreviewSnapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// Spec is what to capture and how.
 	Spec PreviewSnapshotSpec `json:"spec"`
+	// Status is how the capture went, and what it holds.
 	// +optional
 	Status PreviewSnapshotStatus `json:"status,omitempty"`
 }

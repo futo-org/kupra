@@ -49,6 +49,7 @@ spec:
           metadata:
             type: object
           spec:
+            description: Spec describes the app.
             properties:
               links:
                 description: Links are shown for each preview, evaluated into its
@@ -56,6 +57,7 @@ spec:
                 items:
                   properties:
                     name:
+                      description: Name is the link's label.
                       type: string
                     urlExpr:
                       description: URLExpr is a CEL expression that evaluates to the
@@ -80,6 +82,8 @@ spec:
                         of their type.
                       type: string
                     description:
+                      description: Description is shown with the parameter in the
+                        dashboard.
                       type: string
                     enum:
                       description: Enum limits the parameter to these values.
@@ -88,17 +92,22 @@ spec:
                       type: array
                       x-kubernetes-list-type: atomic
                     name:
-                      description: Identifier is a name that expressions refer to,
-                        such as the tag in parameters.tag.
+                      description: Name is how expressions refer to the parameter,
+                        as in parameters.<name>, and the key of its value in a Preview.
                       maxLength: 63
                       pattern: ^[A-Za-z_][A-Za-z0-9_]*$
                       type: string
                     required:
+                      description: Required parameters must be given a value by each
+                        Preview.
                       type: boolean
                     title:
+                      description: Title is the parameter's label in the dashboard.
                       type: string
                     type:
                       default: string
+                      description: Type is what kind of value the parameter takes.
+                        Expressions see it as that type.
                       enum:
                       - string
                       - integer
@@ -119,6 +128,7 @@ spec:
                           - repository
                           type: object
                         type:
+                          description: Type is the kind of input the dashboard shows.
                           enum:
                           - imageTag
                           type: string
@@ -126,7 +136,8 @@ spec:
                       - type
                       type: object
                       x-kubernetes-validations:
-                      - message: imageTag must be set if and only if type is imageTag
+                      - message: imageTag must be set when type is imageTag, and only
+                          then
                         rule: 'self.type == ''imageTag'' ? has(self.imageTag) : !has(self.imageTag)'
                   required:
                   - name
@@ -137,6 +148,7 @@ spec:
                 - name
                 x-kubernetes-list-type: map
               template:
+                description: Template is what each preview runs.
                 properties:
                   resources:
                     description: Resources are the manifests rendered for each preview.
@@ -164,8 +176,8 @@ spec:
                       description: Expression is a CEL expression.
                       type: string
                     name:
-                      description: Identifier is a name that expressions refer to,
-                        such as the tag in parameters.tag.
+                      description: Name is how expressions refer to the variable,
+                        as in variables.<name>.
                       maxLength: 63
                       pattern: ^[A-Za-z_][A-Za-z0-9_]*$
                       type: string
@@ -181,8 +193,11 @@ spec:
             - template
             type: object
           status:
+            description: Status says whether the app passed its checks.
             properties:
               conditions:
+                description: Conditions say whether the app passed its checks (Ready),
+                  and if not, why (Stalled).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -242,6 +257,7 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               observedGeneration:
+                description: ObservedGeneration is the generation the status describes.
                 format: int64
                 type: integer
             type: object
@@ -249,7 +265,7 @@ spec:
         - spec
         type: object
         x-kubernetes-validations:
-        - message: name must be no more than 63 characters, so it fits in a label
+        - message: metadata.name must be no more than 63 characters
           rule: self.metadata.name.size() <= 63
     served: true
     storage: true
