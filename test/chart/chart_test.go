@@ -72,26 +72,24 @@ func TestCommonLabelsKeepSelectors(t *testing.T) {
 	}
 }
 
-// commonLabels can't replace the labels that aggregate the base roles into kupra's template and operator roles, and operator.podLabels win over commonLabels on the operator's pods.
-func TestLabelPrecedence(t *testing.T) {
-	objs := render(t,
-		"--set-string", "commonLabels.kupra\\.futo\\.tech/aggregate-to-template=false",
-		"--set-string", "commonLabels.kupra\\.futo\\.tech/aggregate-to-operator=false",
-		"--set", "commonLabels.team=common",
-		"--set", "operator.podLabels.team=pods",
-	)
-	for _, u := range objs {
-		labels := u.GetLabels()
-		switch {
-		case u.GetName() == "kupra-preview-template-base" && labels["kupra.futo.tech/aggregate-to-template"] != "true":
-			t.Errorf("ClusterRole %s is labelled aggregate-to-template %q, want true", u.GetName(), labels["kupra.futo.tech/aggregate-to-template"])
-		case u.GetName() == "kupra-operator-bind-base" && labels["kupra.futo.tech/aggregate-to-operator"] != "true":
-			t.Errorf("ClusterRole %s is labelled aggregate-to-operator %q, want true", u.GetName(), labels["kupra.futo.tech/aggregate-to-operator"])
-		case u.GetKind() == "Deployment":
-			pods, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "labels")
-			if pods["team"] != "pods" {
-				t.Errorf("the operator's pods are labelled team %q, want podLabels' pods", pods["team"])
-			}
+// operator.podLabels win over commonLabels on the operator's pods.
+func TestPodLabelsWin(t *testing.T) {
+	for _, u := range render(t, "--set", "commonLabels.team=common", "--set", "operator.podLabels.team=pods") {
+		if u.GetKind() != "Deployment" {
+			continue
+		}
+		pods, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "labels")
+		if pods["team"] != "pods" {
+			t.Errorf("the operator's pods are labelled team %q, want podLabels' pods", pods["team"])
+		}
+	}
+}
+
+// commonLabels go on every ClusterRole, so they may not be aggregation labels, which would add the chart's roles, and their access to Secrets, to other roles.
+func TestCommonLabelsRejectAggregation(t *testing.T) {
+	for _, key := range []string{"rbac\\.authorization\\.k8s\\.io/aggregate-to-view", "kupra\\.futo\\.tech/aggregate-to-template", "kupra\\.futo\\.tech/aggregate-to-operator"} {
+		if out, err := exec.Command("helm", "template", "kupra", "../../charts/kupra", "--set-string", "commonLabels."+key+"=true").CombinedOutput(); err == nil || !bytes.Contains(out, []byte("invalid propertyName")) {
+			t.Errorf("commonLabels %s was accepted, want the values schema to reject it", key)
 		}
 	}
 }
