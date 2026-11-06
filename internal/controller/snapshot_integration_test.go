@@ -390,6 +390,16 @@ template:
 		if c := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReconcilingCondition); c == nil || !strings.Contains(c.Message, "Preview pinned") {
 			t.Errorf("Reconciling = %+v, want it to name Preview pinned", c)
 		}
+		ready := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReadyCondition)
+		if ready == nil {
+			t.Fatal("PreviewSnapshot base-1 has no Ready condition")
+		}
+		if ready.Status != metav1.ConditionFalse || ready.Reason != controller.ReasonInUse {
+			t.Errorf("Ready is %s (%s), want False (%s)", ready.Status, ready.Reason, controller.ReasonInUse)
+		}
+		if !strings.Contains(ready.Message, "Preview pinned") {
+			t.Errorf("Ready message %q doesn't name Preview pinned", ready.Message)
+		}
 		if err := k8s.Delete(ctx, pinned); err != nil {
 			t.Fatal(err)
 		}
