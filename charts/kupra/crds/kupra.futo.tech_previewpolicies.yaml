@@ -43,7 +43,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec is the settings for preview namespaces.
+            description: Spec is the settings for preview namespaces. Fields left
+              out are taken from the default PreviewPolicy.
             properties:
               apiServerAccess:
                 description: APIServerAccess lets some pods in each preview namespace

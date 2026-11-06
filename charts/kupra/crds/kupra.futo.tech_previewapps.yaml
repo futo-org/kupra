@@ -99,7 +99,7 @@ spec:
                       type: string
                     required:
                       description: Required parameters must be given a value by each
-                        Preview.
+                        Preview, unless they have a default.
                       type: boolean
                     title:
                       description: Title is the parameter's label in the dashboard.

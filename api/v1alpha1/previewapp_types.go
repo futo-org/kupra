@@ -73,7 +73,7 @@ type Parameter struct {
 	// +optional
 	Default *string `json:"default,omitempty"`
 
-	// Required parameters must be given a value by each Preview.
+	// Required parameters must be given a value by each Preview, unless they have a default.
 	// +optional
 	Required bool `json:"required,omitempty"`
 
