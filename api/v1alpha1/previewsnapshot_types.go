@@ -100,7 +100,8 @@ type Capture struct {
 // +kubebuilder:resource:categories=kupra
 // +kubebuilder:printcolumn:name="Preview",type=string,JSONPath=`.spec.source.previewRef.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.readyToUse`
+// +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`,priority=1
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].message`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

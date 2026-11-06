@@ -16,7 +16,25 @@ formatters:
 linters:
   enable:
     - depguard
+    - errorlint
+    - forbidigo
+    - revive
+  exclusions:
+    rules:
+      # Tests poll with sleeps, and print errors as values in their failure messages.
+      - path: _test\.go$
+        linters: [errorlint, forbidigo]
   settings:
+    revive:
+      rules:
+        # CONTRIBUTING's "Prose in code": messages are lowercase and have no trailing period.
+        - name: error-strings
+    forbidigo:
+      forbid:
+        - pattern: ^time\.Sleep$
+          msg: requeue instead of blocking a worker
+        - pattern: ^fmt\.Print
+          msg: log with the context's logger
     depguard:
       rules:
         # State kinds, rendering and naming don't talk to the API server (ADR 2): only the controllers do. They may log.
