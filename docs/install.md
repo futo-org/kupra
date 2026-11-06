@@ -1,6 +1,6 @@
 # Installing kupra
 
-kupra needs Kubernetes 1.36 or newer, or 1.34 and 1.35 with the `MutatingAdmissionPolicy` feature gate enabled. To snapshot state, it needs the CSI snapshot controller, and a default VolumeSnapshotClass for each CSI driver previews use.
+kupra needs Kubernetes 1.36 or newer. To snapshot state, it needs the CSI snapshot controller, and a default VolumeSnapshotClass for each CSI driver previews use.
 
 ## Install
 
@@ -29,5 +29,5 @@ defaultPolicy:
   resourceQuota:
     hard:
       requests.cpu: "8"
-  limitRange: null
+      requests.memory: null
 ```

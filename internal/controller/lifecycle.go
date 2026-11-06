@@ -42,6 +42,7 @@ const (
 	ReasonResetting        = "Resetting"
 	ReasonSnapshotNotFound = "SnapshotNotFound"
 	ReasonSnapshotNotReady = "SnapshotNotReady"
+	ReasonSnapshotUnusable = "SnapshotUnusable"
 	ReasonRestoreFailed    = "RestoreFailed"
 	ReasonCaptureFailed    = "CaptureFailed"
 	ReasonWaiting          = "Waiting"
@@ -338,8 +339,8 @@ func (r *PreviewReconciler) chooseSnapshot(ctx context.Context, p *kuprav1alpha1
 			}
 			return nil, "", "", err
 		}
-		if !s.Status.ReadyToUse || !s.DeletionTimestamp.IsZero() {
-			return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s is not ready", s.Name), nil
+		if reason, message := snapshotUnready(&s); reason != "" {
+			return nil, reason, message, nil
 		}
 		return &s, "", "", nil
 	}
@@ -365,6 +366,19 @@ func (r *PreviewReconciler) chooseSnapshot(ctx context.Context, p *kuprav1alpha1
 		return nil, ReasonSnapshotNotFound, fmt.Sprintf("no ready PreviewSnapshot matches %s", selectorString(selector)), nil
 	}
 	return newest, "", "", nil
+}
+
+// snapshotUnready returns why a snapshot can't be restored from, if it can't: ReasonSnapshotNotReady while its capture can still finish, and ReasonSnapshotUnusable once it can't.
+func snapshotUnready(s *kuprav1alpha1.PreviewSnapshot) (string, string) {
+	switch {
+	case !s.DeletionTimestamp.IsZero():
+		return ReasonSnapshotUnusable, fmt.Sprintf("PreviewSnapshot %s is being deleted", s.Name)
+	case s.Status.Phase == kuprav1alpha1.PreviewSnapshotFailed:
+		return ReasonSnapshotUnusable, fmt.Sprintf("PreviewSnapshot %s failed", s.Name)
+	case !s.Status.ReadyToUse:
+		return ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s is not ready", s.Name)
+	}
+	return "", ""
 }
 
 func newerSnapshot(a, b *kuprav1alpha1.PreviewSnapshot) bool {
@@ -629,8 +643,8 @@ func (r *PreviewReconciler) holdSnapshot(ctx context.Context, p *kuprav1alpha1.P
 	if controllerutil.ContainsFinalizer(&s, finalizer) {
 		return &s, "", "", nil
 	}
-	if !s.Status.ReadyToUse || !s.DeletionTimestamp.IsZero() {
-		return nil, ReasonSnapshotNotReady, fmt.Sprintf("PreviewSnapshot %s is not ready", name), nil
+	if reason, message := snapshotUnready(&s); reason != "" {
+		return nil, reason, message, nil
 	}
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	controllerutil.AddFinalizer(&s, finalizer)
