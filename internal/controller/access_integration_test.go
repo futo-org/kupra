@@ -5,7 +5,6 @@ package controller_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/fluxcd/pkg/apis/meta"
@@ -53,10 +52,9 @@ func allowed(t *testing.T, user string, attrs authorizationv1.ResourceAttributes
 
 func TestAccess(t *testing.T) {
 	ctx := context.Background()
-	templates := filepath.Join("..", "..", "charts", "kupra", "templates")
-	apply(t, filepath.Join(templates, "access-clusterroles.yaml"))
-	apply(t, filepath.Join(templates, "created-by.yaml"))
-	apply(t, filepath.Join(templates, "snapshot-source.yaml"))
+	applyTemplate(t, "access-clusterroles.yaml")
+	applyTemplate(t, "created-by.yaml")
+	applyTemplate(t, "snapshot-source.yaml")
 	setUpPolicies(t)
 
 	createNamespace(t, "access", nil)

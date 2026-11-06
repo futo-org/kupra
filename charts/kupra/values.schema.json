@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "commonLabels": {
+      "description": "Labels added to every object the chart creates.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {"type": "integer", "minimum": 0},
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {"type": "string"},
+            "tag": {"description": "Defaults to the chart's appVersion.", "type": "string"},
+            "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]}
+          }
+        },
+        "imagePullSecrets": {"type": "array", "items": {"type": "object"}},
+        "extraArgs": {"description": "Arguments added to the operator's command line.", "type": "array", "items": {"type": "string"}},
+        "resources": {"type": "object"},
+        "podAnnotations": {"type": "object", "additionalProperties": {"type": "string"}},
+        "podLabels": {"type": "object", "additionalProperties": {"type": "string"}},
+        "podSecurityContext": {"type": ["object", "null"]},
+        "securityContext": {"type": ["object", "null"]},
+        "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+        "tolerations": {"type": "array", "items": {"type": "object"}},
+        "affinity": {"type": "object"},
+        "priorityClassName": {"type": "string"}
+      }
+    },
+    "defaultPolicy": {
+      "description": "The spec of the default PreviewPolicy.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apply": {"type": ["object", "null"]},
+        "networkPolicies": {"type": ["array", "null"]},
+        "apiServerAccess": {"type": ["object", "null"]},
+        "resourceQuota": {"type": ["object", "null"]},
+        "limitRange": {"type": ["object", "null"]},
+        "namespaceMetadata": {"type": ["object", "null"]}
+      }
+    }
+  }
+}

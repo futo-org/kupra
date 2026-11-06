@@ -32,12 +32,10 @@ spec:
       {{- with .Values.operator.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
+      {{- with .Values.operator.podSecurityContext }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: operator
           image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
@@ -69,11 +67,10 @@ spec:
               port: health
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
+          {{- with .Values.operator.securityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- with .Values.operator.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

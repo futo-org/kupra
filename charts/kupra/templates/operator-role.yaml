@@ -5,6 +5,7 @@
 {{- if eq (dig "namespace" "" $obj.metadata) "kupra-system" }}
 {{- $_ := set $obj.metadata "namespace" $.Release.Namespace }}
 {{- end }}
+{{- $_ := set $obj.metadata "labels" (include "kupra.labels" $ | fromYaml) }}
 ---
 {{ toYaml $obj }}
 {{- end }}

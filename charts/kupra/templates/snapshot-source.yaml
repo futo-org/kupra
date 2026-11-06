@@ -2,6 +2,8 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
   name: kupra-snapshot-source
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 spec:
   matchConstraints:
     resourceRules:
@@ -23,6 +25,8 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: kupra-snapshot-source
+  labels:
+    {{- include "kupra.labels" . | nindent 4 }}
 spec:
   policyName: kupra-snapshot-source
   validationActions: [Deny]
