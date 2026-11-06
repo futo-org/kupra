@@ -30,8 +30,16 @@ var defaults = kuprav1alpha1.PreviewPolicySpec{
 
 func TestEffectiveFallsBack(t *testing.T) {
 	got := Effective(kuprav1alpha1.PreviewPolicySpec{}, &defaults)
-	if got.Apply.ClusterRoleRef.Name != "kupra-preview-template" || len(got.NetworkPolicies) != 1 || got.APIServerAccess == nil || got.ResourceQuota == nil || got.LimitRange == nil {
-		t.Errorf("fields left out weren't filled in from the fallback: %+v", got)
+	for field, filled := range map[string]bool{
+		"apply":           got.Apply != nil && got.Apply.ClusterRoleRef.Name == "kupra-preview-template",
+		"networkPolicies": len(got.NetworkPolicies) == 1,
+		"apiServerAccess": got.APIServerAccess != nil,
+		"resourceQuota":   got.ResourceQuota != nil,
+		"limitRange":      got.LimitRange != nil,
+	} {
+		if !filled {
+			t.Errorf("%s wasn't filled in from the fallback", field)
+		}
 	}
 	if got.NamespaceMetadata.Labels["pod-security.kubernetes.io/enforce"] != "baseline" {
 		t.Errorf("labels = %v, want the fallback's", got.NamespaceMetadata.Labels)
@@ -55,7 +63,7 @@ func TestEffectiveKeepsOwnSettings(t *testing.T) {
 		t.Errorf("network policies = %v, want the policy's explicitly empty list", got.NetworkPolicies)
 	}
 	if got.APIServerAccess == nil || got.APIServerAccess.PodSelector != nil {
-		t.Errorf("API server access = %+v, want the policy's, which selects no pods", got.APIServerAccess)
+		t.Error("API server access isn't the policy's own, which selects no pods")
 	}
 	if len(got.ResourceQuota.Hard) != 0 {
 		t.Errorf("resource quota = %v, want the policy's empty one", got.ResourceQuota)
@@ -79,8 +87,15 @@ func TestEffectiveKeepsOwnSettings(t *testing.T) {
 
 func TestEffectiveWithoutFallback(t *testing.T) {
 	got := Effective(kuprav1alpha1.PreviewPolicySpec{}, nil)
-	if got.Apply != nil || got.NetworkPolicies != nil || got.ResourceQuota != nil || got.NamespaceMetadata != nil {
-		t.Errorf("got %+v, want nothing filled in", got)
+	for field, filled := range map[string]bool{
+		"apply":             got.Apply != nil,
+		"networkPolicies":   got.NetworkPolicies != nil,
+		"resourceQuota":     got.ResourceQuota != nil,
+		"namespaceMetadata": got.NamespaceMetadata != nil,
+	} {
+		if filled {
+			t.Errorf("%s was filled in without a fallback", field)
+		}
 	}
 }
 

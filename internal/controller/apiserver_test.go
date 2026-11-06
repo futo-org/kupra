@@ -37,6 +37,6 @@ func TestAPIServerEgress(t *testing.T) {
 		t.Errorf("destinations = %v, want %v", cidrs, want)
 	}
 	if len(rule.Ports) != 1 || rule.Ports[0].Port.IntValue() != 6443 || *rule.Ports[0].Protocol != tcp {
-		t.Errorf("ports = %+v, want TCP 6443 once", rule.Ports)
+		t.Errorf("rule has %d ports, want TCP 6443 once", len(rule.Ports))
 	}
 }

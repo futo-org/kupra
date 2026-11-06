@@ -23,6 +23,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/policy"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 func createApp(t *testing.T, namespace, name, spec string) *kuprav1alpha1.PreviewApp {
@@ -54,7 +55,7 @@ func waitForReady(t *testing.T, app *kuprav1alpha1.PreviewApp, status metav1.Con
 		}
 		c := apimeta.FindStatusCondition(got.Status.Conditions, meta.ReadyCondition)
 		if c == nil || c.ObservedGeneration != got.Generation || c.Status != status || c.Reason != reason {
-			return fmt.Errorf("PreviewApp %s: Ready = %+v, want %s with reason %s", app.Name, c, status, reason)
+			return fmt.Errorf("PreviewApp %s is Ready %s, want %s (%s)", app.Name, testutil.Condition(c), status, reason)
 		}
 		for _, m := range messages {
 			if !strings.Contains(c.Message, m) {
@@ -307,10 +308,10 @@ func TestOwnerValidation(t *testing.T) {
 		}
 		err := k8s.Create(ctx, p, client.DryRunAll)
 		if tc.ok && err != nil {
-			t.Errorf("owner %+v: %v", tc.owner, err)
+			t.Errorf("owner %s: %v", testutil.Subject(tc.owner), err)
 		}
 		if !tc.ok && err == nil {
-			t.Errorf("owner %+v was accepted, want it rejected", tc.owner)
+			t.Errorf("owner %s was accepted, want it rejected", testutil.Subject(tc.owner))
 		}
 	}
 }

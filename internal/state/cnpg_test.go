@@ -205,7 +205,7 @@ func TestClusterCapture(t *testing.T) {
 		t.Error("the Backup is left in the preview's namespace")
 	}
 	if len(resp.Capture.Data) != 2 || resp.Capture.Data[0].Name != targets["PG_DATA"].GetName() || resp.Capture.Data[1].Name != targets["PG_WAL"].GetName() {
-		t.Errorf("capture = %+v, want the moved VolumeSnapshots", resp.Capture)
+		t.Errorf("capture holds %d objects, want the moved PG_DATA and PG_WAL VolumeSnapshots, in that order", len(resp.Capture.Data))
 	}
 }
 
@@ -289,7 +289,7 @@ func TestClusterRestore(t *testing.T) {
 	// Once the cluster exists, updates keep its bootstrap and sizes.
 	again := kind.Restore(RestoreRequest{Resource: object(t, database), Live: resp.Resource, From: req.From, Names: req.Names})
 	if !again.Done || len(again.Apply) > 0 || len(again.Observe) > 0 {
-		t.Fatalf("restoring an existing cluster = %+v, want it done straight away", again)
+		t.Fatalf("restoring an existing cluster is done %v, applying %d objects and reading %d; want it done straight away", again.Done, len(again.Apply), len(again.Observe))
 	}
 	if _, ok, _ := unstructured.NestedMap(again.Resource.Object, "spec", "bootstrap", "recovery"); !ok {
 		t.Error("updated cluster's recovery bootstrap isn't kept")

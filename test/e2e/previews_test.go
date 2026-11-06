@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 // The kind node image already has the pause image, as its pod sandbox.
@@ -107,7 +108,7 @@ func TestPreviewLifecycle(t *testing.T) {
 			}
 			ready := apimeta.FindStatusCondition(preview.Status.Conditions, meta.ReadyCondition)
 			if preview.Status.ObservedGeneration != preview.Generation || preview.Status.Phase != kuprav1alpha1.PreviewRunning {
-				return fmt.Errorf("Preview is %s, Ready %+v", preview.Status.Phase, ready)
+				return fmt.Errorf("Preview is %s, Ready %s", preview.Status.Phase, testutil.Condition(ready))
 			}
 			var d appsv1.Deployment
 			if err := k8s.Get(ctx, client.ObjectKey{Namespace: preview.Status.Namespace, Name: "web"}, &d); err != nil {

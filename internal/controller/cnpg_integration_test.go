@@ -131,10 +131,10 @@ template:
 		t.Fatal(err)
 	}
 	if len(np.Spec.Egress) != 1 || len(np.Spec.Egress[0].To) == 0 || np.Spec.Egress[0].To[0].IPBlock == nil || len(np.Spec.Egress[0].Ports) == 0 {
-		t.Errorf("API server policy egress = %+v, want the API server's addresses and ports", np.Spec.Egress)
+		t.Errorf("API server policy has %d egress rules, want one with the API server's addresses and ports", len(np.Spec.Egress))
 	}
 	if len(np.Spec.PodSelector.MatchExpressions) != 1 || np.Spec.PodSelector.MatchExpressions[0].Key != "cnpg.io/cluster" {
-		t.Errorf("API server policy selects %+v, want CloudNativePG's pods", np.Spec.PodSelector)
+		t.Errorf("API server policy selects %s, want CloudNativePG's pods", metav1.FormatLabelSelector(&np.Spec.PodSelector))
 	}
 
 	snap := &kuprav1alpha1.PreviewSnapshot{
@@ -185,7 +185,7 @@ template:
 		}
 		s := waitForSnapshotPhase(t, "cnpg", "base", kuprav1alpha1.PreviewSnapshotSucceeded)
 		if len(s.Status.Captures) != 1 || s.Status.Captures[0].Kind != "Cluster" || len(s.Status.Captures[0].Data) != 2 {
-			t.Errorf("captures = %+v, want the cluster's two VolumeSnapshots", s.Status.Captures)
+			t.Errorf("PreviewSnapshot has %d captures, want one of the cluster, with its two VolumeSnapshots", len(s.Status.Captures))
 		}
 		eventually(t, func() error {
 			if err := k8s.Get(ctx, client.ObjectKeyFromObject(backup), backup); !apierrors.IsNotFound(err) {

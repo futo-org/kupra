@@ -21,6 +21,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/controller"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 // finishDeletions removes the finalizers that the garbage collector and PVC protection would, which envtest doesn't run.
@@ -115,7 +116,7 @@ func waitForSnapshotPhase(t *testing.T, namespace, name string, phase kuprav1alp
 			return err
 		}
 		if s.Status.Phase != phase {
-			return fmt.Errorf("PreviewSnapshot %s: phase %s, conditions %+v; want %s", name, s.Status.Phase, s.Status.Conditions, phase)
+			return fmt.Errorf("PreviewSnapshot %s is %s, with conditions %s; want %s", name, s.Status.Phase, testutil.Conditions(s.Status.Conditions), phase)
 		}
 		return nil
 	})
@@ -154,7 +155,7 @@ template:
 	p := waitForPhase(t, "snapshots", "source", kuprav1alpha1.PreviewRunning, "Succeeded")
 	sourceNS := p.Status.Namespace
 	if c := apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored); c == nil || c.Message != "started empty" {
-		t.Errorf("Restored = %+v, want it to say the preview started empty", c)
+		t.Errorf("Restored is %s, want it to say the preview started empty", testutil.Condition(c))
 	}
 
 	snap := &kuprav1alpha1.PreviewSnapshot{
@@ -184,13 +185,13 @@ template:
 			t.Errorf("source content's deletion policy = %s, want Retain", sourceContent.Spec.DeletionPolicy)
 		}
 		if owners := moved.OwnerReferences; len(owners) != 1 || owners[0].UID != snap.UID {
-			t.Errorf("moved VolumeSnapshot's owners = %+v, want the PreviewSnapshot", owners)
+			t.Errorf("moved VolumeSnapshot has %d owners, want only the PreviewSnapshot", len(owners))
 		}
 		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
 
 		s := waitForSnapshotPhase(t, "snapshots", "base-1", kuprav1alpha1.PreviewSnapshotSucceeded)
 		if !s.Status.ReadyToUse || len(s.Status.Captures) != 1 || s.Status.Captures[0].Name != "data" || s.Status.Captures[0].Data[0].Name != moved.Name {
-			t.Errorf("snapshot status = %+v, want a capture of data in %s", s.Status, moved.Name)
+			t.Errorf("PreviewSnapshot is ready %v, with %d captures; want a capture of data in %s", s.Status.ReadyToUse, len(s.Status.Captures), moved.Name)
 		}
 		if s.Status.AppRef == nil || s.Status.AppRef.Name != "app" {
 			t.Errorf("snapshot appRef = %v, want app", s.Status.AppRef)
@@ -323,14 +324,14 @@ template:
 			t.Fatal(err)
 		}
 		if content.Spec.DeletionPolicy != snapshotv1.VolumeSnapshotContentRetain || *content.Spec.Source.SnapshotHandle != "handle-1" {
-			t.Errorf("restore copy = %+v, want handle-1, retained", content.Spec)
+			t.Errorf("restore copy's content has deletion policy %s and snapshot handle %q, want Retain and handle-1", content.Spec.DeletionPolicy, *content.Spec.Source.SnapshotHandle)
 		}
 		var pvc corev1.PersistentVolumeClaim
 		if err := k8s.Get(ctx, client.ObjectKey{Namespace: p.Status.Namespace, Name: "data"}, &pvc); err != nil {
 			t.Fatal(err)
 		}
 		if ref := pvc.Spec.DataSourceRef; ref == nil || ref.Kind != "VolumeSnapshot" || ref.Name != copied.Name {
-			t.Errorf("claim's data source = %+v, want %s", ref, copied.Name)
+			t.Errorf("claim's data source is %s, want VolumeSnapshot %s", testutil.DataSource(ref), copied.Name)
 		}
 
 		// The app starts before the claim is bound, but the restore isn't over until it is.
@@ -388,7 +389,7 @@ template:
 		}
 		s := waitForSnapshotPhase(t, "snapshots", "base-1", kuprav1alpha1.PreviewSnapshotDeleting)
 		if c := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReconcilingCondition); c == nil || !strings.Contains(c.Message, "Preview pinned") {
-			t.Errorf("Reconciling = %+v, want it to name Preview pinned", c)
+			t.Errorf("Reconciling is %s, want it to name Preview pinned", testutil.Condition(c))
 		}
 		ready := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReadyCondition)
 		if ready == nil {
@@ -441,7 +442,7 @@ template:
 			got := getPreview(t, "snapshots", "restored")
 			c := apimeta.FindStatusCondition(got.Status.Conditions, meta.ReadyCondition)
 			if got.Status.LastHandledResetAt != "2" || got.Status.Phase != kuprav1alpha1.PreviewPending || c == nil || c.Reason != controller.ReasonSnapshotNotFound {
-				return fmt.Errorf("lastHandledResetAt %q, phase %s, Ready %+v; want 2, Pending with SnapshotNotFound", got.Status.LastHandledResetAt, got.Status.Phase, c)
+				return fmt.Errorf("lastHandledResetAt %q, phase %s, Ready %s; want 2, Pending with SnapshotNotFound", got.Status.LastHandledResetAt, got.Status.Phase, testutil.Condition(c))
 			}
 			return nil
 		})
@@ -468,7 +469,7 @@ func waitForRestored(t *testing.T, namespace, name string, status metav1.Conditi
 		p := getPreview(t, namespace, name)
 		c := apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored)
 		if c == nil || c.Status != status || !strings.Contains(c.Message, message) {
-			return fmt.Errorf("Preview %s: Restored %+v, want %s with %q", name, c, status, message)
+			return fmt.Errorf("Preview %s is Restored %s, want %s with %q", name, testutil.Condition(c), status, message)
 		}
 		return nil
 	})
@@ -561,7 +562,7 @@ template:
 		p = getPreview(t, "restore-retries", "retry")
 		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
 		if c == nil || c.Reason != controller.ReasonApplyFailed {
-			return fmt.Errorf("Preview retry: Ready %+v, want reason %s", c, controller.ReasonApplyFailed)
+			return fmt.Errorf("Preview retry is Ready %s, want reason %s", testutil.Condition(c), controller.ReasonApplyFailed)
 		}
 		return nil
 	})
@@ -579,7 +580,7 @@ template:
 		return k8s.Get(ctx, client.ObjectKey{Namespace: p.Status.Namespace, Name: "data"}, &pvc)
 	})
 	if pvc.Spec.DataSourceRef == nil || pvc.Spec.DataSourceRef.Kind != "VolumeSnapshot" {
-		t.Errorf("claim's data source = %+v, want the restored VolumeSnapshot", pvc.Spec.DataSourceRef)
+		t.Errorf("claim's data source is %s, want the restored VolumeSnapshot", testutil.DataSource(pvc.Spec.DataSourceRef))
 	}
 
 	// While the claim is provisioning, the snapshot it restores from is held.
@@ -655,7 +656,7 @@ template:
 	}
 	s := waitForSnapshotPhase(t, "restore-retries", "base", kuprav1alpha1.PreviewSnapshotDeleting)
 	if c := apimeta.FindStatusCondition(s.Status.Conditions, meta.ReconcilingCondition); c == nil || !strings.Contains(c.Message, "Preview retry") {
-		t.Errorf("Reconciling = %+v, want it to name Preview retry", c)
+		t.Errorf("Reconciling is %s, want it to name Preview retry", testutil.Condition(c))
 	}
 
 	bindClaim(t, p.Status.Namespace, "data")
@@ -792,7 +793,7 @@ func TestResetWithoutNamespace(t *testing.T) {
 		return nil
 	})
 	if p.Status.LastHandledResetAt != "1" || p.Status.RestoredFrom != nil || len(p.Status.Inventory) != 0 || apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored) != nil {
-		t.Errorf("status = %+v, want the reset handled and the restore cleared", p.Status)
+		t.Errorf("lastHandledResetAt %q, restoredFrom %v, inventory %s, Restored %s; want the reset handled and the restore cleared", p.Status.LastHandledResetAt, p.Status.RestoredFrom, testutil.Inventory(p.Status.Inventory), testutil.Condition(apimeta.FindStatusCondition(p.Status.Conditions, controller.ConditionRestored)))
 	}
 	if err := k8s.Get(ctx, client.ObjectKeyFromObject(snap), snap); err != nil {
 		t.Fatal(err)
@@ -953,7 +954,7 @@ template:
 	eventually(t, func() error {
 		c := apimeta.FindStatusCondition(getPreview(t, "copies", "restored").Status.Conditions, meta.ReadyCondition)
 		if c == nil || !strings.Contains(c.Message, "no snapshot class") {
-			return fmt.Errorf("Ready = %+v, want it to say what the copy is waiting for", c)
+			return fmt.Errorf("Ready is %s, want it to say what the copy is waiting for", testutil.Condition(c))
 		}
 		return nil
 	})

@@ -171,7 +171,7 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 		t.Error("the source VolumeSnapshot is left in the preview's namespace")
 	}
 	if len(resp.Capture.Data) != 1 || resp.Capture.Data[0].Name != target.GetName() || resp.Capture.Data[0].Kind != "VolumeSnapshot" {
-		t.Errorf("capture = %+v, want the moved VolumeSnapshot", resp.Capture)
+		t.Errorf("capture holds %d objects, want only the moved VolumeSnapshot", len(resp.Capture.Data))
 	}
 }
 
@@ -189,7 +189,7 @@ status: {error: {message: no snapshot class}}
 `)
 	resp := kind.Capture(CaptureRequest{Resource: object(t, claim), Namespace: "app", Names: n, Observed: Observed{source: failed, target: nil}})
 	if resp.Failed != "" || resp.Done || !strings.Contains(resp.Waiting, "no snapshot class") {
-		t.Errorf("response = %+v, want it waiting on the VolumeSnapshot's error", resp)
+		t.Errorf("capture failed %q, done %v, waiting %q; want it waiting on the VolumeSnapshot's error", resp.Failed, resp.Done, resp.Waiting)
 	}
 }
 
@@ -251,7 +251,7 @@ status: {snapshotHandle: handle-2, readyToUse: true}
 	rendered := object(t, claim)
 	again := kind.Restore(RestoreRequest{Resource: rendered, Live: live, From: req.From, Names: req.Names})
 	if !again.Done || len(again.Apply) > 0 || len(again.Observe) > 0 {
-		t.Fatalf("restoring an existing claim = %+v, want it done straight away", again)
+		t.Fatalf("restoring an existing claim is done %v, applying %d objects and reading %d; want it done straight away", again.Done, len(again.Apply), len(again.Observe))
 	}
 	if name, _, _ := unstructured.NestedString(again.Resource.Object, "spec", "dataSourceRef", "name"); name != restored.GetName() {
 		t.Errorf("updated claim's data source = %q, want it kept", name)

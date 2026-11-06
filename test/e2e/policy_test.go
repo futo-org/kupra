@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 func create(t *testing.T, obj client.Object) {
@@ -80,7 +81,7 @@ template:
 			}
 			c := apimeta.FindStatusCondition(app.Status.Conditions, meta.ReadyCondition)
 			if c == nil || c.ObservedGeneration != app.Generation || c.Status != status || c.Reason != reason {
-				return fmt.Errorf("PreviewApp Ready = %+v, want %s with reason %s", c, status, reason)
+				return fmt.Errorf("PreviewApp is Ready %s, want %s (%s)", testutil.Condition(c), status, reason)
 			}
 			return nil
 		})
@@ -111,7 +112,7 @@ template:
 			return err
 		}
 		if preview.Status.Phase != kuprav1alpha1.PreviewRunning {
-			return fmt.Errorf("Preview is %s: %+v", preview.Status.Phase, preview.Status.Conditions)
+			return fmt.Errorf("Preview is %s: %s", preview.Status.Phase, testutil.Conditions(preview.Status.Conditions))
 		}
 		return nil
 	})
