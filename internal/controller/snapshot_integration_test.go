@@ -951,12 +951,29 @@ template:
 		t.Errorf("claim: %v, want it created only once its copy is bound", err)
 	}
 
-	// The snapshot controller binds the copy.
+	// The snapshot controller binds the copy, recording its UID in its content.
 	if err := k8s.Get(ctx, client.ObjectKeyFromObject(copied), copied); err != nil {
 		t.Fatal(err)
 	}
-	bindSnapshot(t, copied, *copied.Spec.Source.VolumeSnapshotContentName)
+	var content snapshotv1.VolumeSnapshotContent
+	if err := k8s.Get(ctx, client.ObjectKey{Name: *copied.Spec.Source.VolumeSnapshotContentName}, &content); err != nil {
+		t.Fatal(err)
+	}
+	content.Spec.VolumeSnapshotRef.UID = copied.UID
+	if err := k8s.Update(ctx, &content); err != nil {
+		t.Fatal(err)
+	}
+	bindSnapshot(t, copied, content.Name)
 	eventually(t, func() error {
 		return k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: "data"}, &corev1.PersistentVolumeClaim{})
 	})
+
+	// The provisioner refuses a copy whose content names another snapshot, so later reconciliations leave the binding alone.
+	time.Sleep(3 * time.Second)
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(&content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.Spec.VolumeSnapshotRef.UID != copied.UID {
+		t.Errorf("copy's content is bound to UID %q, want %q", content.Spec.VolumeSnapshotRef.UID, copied.UID)
+	}
 }

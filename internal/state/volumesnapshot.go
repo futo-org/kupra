@@ -176,13 +176,18 @@ func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed
 	return true, ready, strings.Join(messages, "; "), ""
 }
 
-// restoreCopies returns the restore copies that don't exist yet, to apply, and whether all of them are ready to use, or what they're waiting for. A copy that exists isn't applied again: its content's volumeSnapshotRef is replaced as a whole, which would drop the UID the snapshot controller bound it with.
+// restoreCopies returns the restore copies read and found missing, to apply, and whether all of them are ready to use, or what they're waiting for. A copy that exists isn't applied again: its content's volumeSnapshotRef is replaced as a whole, which would drop the UID the snapshot controller bound it with.
 func restoreCopies(copies map[Ref][]*unstructured.Unstructured, observed Observed) (apply []*unstructured.Unstructured, observe []Ref, ready bool, waiting, failed string) {
 	var messages []string
 	ready = true
 	for _, ref := range slices.SortedFunc(maps.Keys(copies), func(a, b Ref) int { return strings.Compare(a.Name, b.Name) }) {
 		observe = append(observe, ref)
-		obj := observed[ref]
+		obj, seen := observed[ref]
+		if !seen {
+			// Each reconciliation starts with nothing read, so a copy is only known to be missing once it's been read.
+			ready = false
+			continue
+		}
 		if obj == nil {
 			apply = append(apply, copies[ref]...)
 			ready = false

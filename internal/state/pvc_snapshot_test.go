@@ -316,11 +316,21 @@ status: {snapshotHandle: handle-1, readyToUse: true}
 	}
 }
 
-// restore calls a kind's Restore until it's done, playing the snapshot controller, which binds the restore copies a call applies before the next call: it marks them ready, and records their VolumeSnapshot's UID in their content. It fails the test if the kind is done before the copies it applied are bound, or if it applies a copy again and drops that UID.
+// restore calls a kind's Restore until it's done, interleaved with fresh reconciliations, playing the snapshot controller, which binds the restore copies a call applies before the next call: it marks them ready, and records their VolumeSnapshot's UID in their content. It fails the test if the kind is done before the copies it applied are bound, or if it applies a copy again and drops that UID.
 func restore(t *testing.T, kind Kind, req *RestoreRequest, c cluster) Response {
 	t.Helper()
 	var copies []Ref
 	for range 8 {
+		// Each reconciliation starts with nothing read, and reads the copies only after what they're copied from. Whatever a kind applies before it has read its copies happens again on every reconciliation.
+		fresh := *req
+		fresh.Observed = Observed{}
+		for ref, obj := range req.Observed {
+			if !slices.Contains(copies, ref) {
+				fresh.Observed[ref] = obj
+			}
+		}
+		c.step(Response{Apply: kind.Restore(fresh).Apply})
+
 		resp := kind.Restore(*req)
 		if resp.Failed != "" {
 			t.Fatal(resp.Failed)
