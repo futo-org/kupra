@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -92,7 +94,7 @@ kind: VolumeSnapshot
 metadata:
   name: `+name+`
   namespace: preview
-  labels: {cnpg.io/cluster: database, cnpg.io/backupName: backup, cnpg.io/pvcRole: `+role+`, app.kubernetes.io/name: postgresql}
+  labels: {cnpg.io/cluster: database, cnpg.io/backupName: backup, app.kubernetes.io/name: postgresql}
   annotations: {cnpg.io/pvcRole: `+role+`, cnpg.io/backupLabelFile: bGFiZWw=, kubectl.kubernetes.io/last-applied-configuration: x}
 status: {boundVolumeSnapshotContentName: content-`+name+`, readyToUse: true, restoreSize: 2Gi}
 `)
@@ -170,7 +172,7 @@ func TestClusterCapture(t *testing.T) {
 	targets := map[string]*unstructured.Unstructured{}
 	for ref, obj := range c {
 		if ref.Kind == "VolumeSnapshot" && ref.Namespace == "app" {
-			targets[obj.GetLabels()["cnpg.io/pvcRole"]] = obj
+			targets[obj.GetAnnotations()["cnpg.io/pvcRole"]] = obj
 		}
 	}
 	if len(targets) != 2 || targets["PG_DATA"] == nil || targets["PG_WAL"] == nil {
@@ -281,7 +283,7 @@ func TestClusterRestore(t *testing.T) {
 			t.Errorf("no VolumeSnapshot %s for %s", name, field)
 			continue
 		}
-		if copied.GetLabels()["cnpg.io/pvcRole"] != role || copied.GetAnnotations()["cnpg.io/backupLabelFile"] == "" || copied.GetLabels()["kupra.futo.tech/preview-uid"] != "uid" {
+		if copied.GetAnnotations()["cnpg.io/pvcRole"] != role || copied.GetAnnotations()["cnpg.io/backupLabelFile"] == "" || copied.GetLabels()["kupra.futo.tech/preview-uid"] != "uid" {
 			t.Errorf("%s copy has labels %v and annotations %v, want CloudNativePG's and kupra's", field, copied.GetLabels(), copied.GetAnnotations())
 		}
 		contentName, _, _ := unstructured.NestedString(copied.Object, "spec", "source", "volumeSnapshotContentName")
@@ -340,5 +342,23 @@ func TestClusterRestoreWithoutWALStorage(t *testing.T) {
 	req.Resource = object(t, database)
 	if resp := kind.Restore(req); !strings.Contains(resp.Failed, "no PG_WAL VolumeSnapshot") {
 		t.Errorf("failure = %q, want the missing WAL capture reported", resp.Failed)
+	}
+}
+
+// CloudNativePG moved the role from a label to an annotation, and reads the label first.
+func TestRoleOf(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		labels, annotations map[string]string
+		want                string
+	}{
+		{"annotation", nil, map[string]string{"cnpg.io/pvcRole": "PG_WAL"}, "PG_WAL"},
+		{"label", map[string]string{"cnpg.io/pvcRole": "PG_DATA"}, nil, "PG_DATA"},
+		{"both", map[string]string{"cnpg.io/pvcRole": "PG_DATA"}, map[string]string{"cnpg.io/pvcRole": "PG_WAL"}, "PG_DATA"},
+	} {
+		vs := &snapshotv1.VolumeSnapshot{ObjectMeta: metav1.ObjectMeta{Labels: tc.labels, Annotations: tc.annotations}}
+		if got := roleOf(vs); string(got) != tc.want {
+			t.Errorf("%s: role %s, want %s", tc.name, got, tc.want)
+		}
 	}
 }

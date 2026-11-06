@@ -135,8 +135,9 @@ template:
 	var moved []snapshotv1.VolumeSnapshot
 	if !t.Run("capture", func(t *testing.T) {
 		backup := waitForBackup(t, sourceNS, snap)
-		if online, _, _ := unstructured.NestedBool(backup.Object, "spec", "online"); online {
-			t.Error("Backup is online, want it offline for an Offline capture")
+		// CloudNativePG takes online backups unless told otherwise.
+		if online, found, err := unstructured.NestedBool(backup.Object, "spec", "online"); err != nil || !found || online {
+			t.Errorf("Backup online = %v (set %v, %v), want false for an Offline capture", online, found, err)
 		}
 
 		// CloudNativePG backs the cluster up.
@@ -146,7 +147,7 @@ template:
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "database-" + strings.ReplaceAll(strings.ToLower(role), "_", "-"),
 					Namespace:   sourceNS,
-					Labels:      map[string]string{"cnpg.io/cluster": "database", "cnpg.io/backupName": backup.GetName(), "cnpg.io/pvcRole": role},
+					Labels:      map[string]string{"cnpg.io/cluster": "database", "cnpg.io/backupName": backup.GetName()},
 					Annotations: map[string]string{"cnpg.io/pvcRole": role},
 				},
 				Spec: snapshotv1.VolumeSnapshotSpec{Source: snapshotv1.VolumeSnapshotSource{PersistentVolumeClaimName: ptr("database-1")}},
@@ -201,7 +202,7 @@ template:
 		for field, role := range map[string]string{"storage": "PG_DATA", "walStorage": "PG_WAL"} {
 			name, _, _ := unstructured.NestedString(database.Object, "spec", "bootstrap", "recovery", "volumeSnapshots", field, "name")
 			i := slices.IndexFunc(copies, func(vs snapshotv1.VolumeSnapshot) bool { return vs.Name == name })
-			if i < 0 || copies[i].Labels["cnpg.io/pvcRole"] != role {
+			if i < 0 || copies[i].Annotations["cnpg.io/pvcRole"] != role {
 				t.Errorf("recovery %s = %q, want the copy of the %s VolumeSnapshot", field, name, role)
 			}
 		}
@@ -225,6 +226,9 @@ template:
 			t.Fatal(err)
 		}
 		waitForSnapshotPhase(t, "cnpg", "failed", kuprav1alpha1.PreviewSnapshotFailed)
+		if err := k8s.Get(ctx, client.ObjectKeyFromObject(backup), backup); err != nil {
+			t.Fatalf("Backup after the capture failed: %v, want it kept until the PreviewSnapshot is deleted", err)
+		}
 
 		// Deleting the PreviewSnapshot deletes its Backup, and with it the VolumeSnapshots CloudNativePG took.
 		if err := k8s.Delete(ctx, failed); err != nil {

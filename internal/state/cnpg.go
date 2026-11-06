@@ -153,7 +153,7 @@ func (cnpgCluster) Restore(req RestoreRequest) Response {
 		if b == nil {
 			continue
 		}
-		role := cnpgutils.PVCRole(b.snapshot.Labels[cnpgutils.PvcRoleLabelName])
+		role := roleOf(b.snapshot)
 		if _, ok := bound[role]; ok || (role != cnpgutils.PVCRolePgData && role != cnpgutils.PVCRolePgWal) {
 			return Response{Failed: fmt.Sprintf("VolumeSnapshot %s has role %q", ref.Name, role)}
 		}
@@ -333,6 +333,14 @@ func allReady(refs []Ref, observed Observed) (exist, ready bool, waiting, failed
 	}
 	slices.Sort(messages)
 	return true, ready, strings.Join(messages, "; "), ""
+}
+
+// roleOf returns the role of a VolumeSnapshot CloudNativePG took. It's in an annotation, and in a label on snapshots of older versions, which CloudNativePG reads first.
+func roleOf(vs *snapshotv1.VolumeSnapshot) cnpgutils.PVCRole {
+	if role, ok := vs.Labels[cnpgutils.PvcRoleLabelName]; ok {
+		return cnpgutils.PVCRole(role)
+	}
+	return cnpgutils.PVCRole(vs.Annotations[cnpgutils.PvcRoleLabelName])
 }
 
 // cnpgMetadata returns the CloudNativePG labels or annotations in m. It leaves out the cluster label, which marks a cluster's own backups, so copies aren't counted as backups of a cluster with the same name.
