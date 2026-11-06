@@ -7,6 +7,11 @@ k() { kubectl --context kind-kupra-e2e "$@"; }
 
 k get previewapps,previews,previewsnapshots,clusters.postgresql.cnpg.io,backups.postgresql.cnpg.io,volumesnapshots,pods,pvc -A -o wide
 k get events -A --sort-by=.lastTimestamp
+# Deletion times, finalizers and conditions show what's holding up a deletion.
+k get namespaces -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,CONDITIONS:.status.conditions
+k get previews,clusters.postgresql.cnpg.io,pvc,volumesnapshots,volumesnapshotcontents -A \
+  -o custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers
+k get previews,previewsnapshots -A -o custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,CONDITIONS:.status.conditions
 for ns in $(k get namespaces -o name | grep -E "/e2e-"); do
   ns="${ns#namespace/}"
   for pod in $(k -n "$ns" get pods -o name); do
