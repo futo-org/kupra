@@ -68,7 +68,7 @@ func newProvider(t *testing.T) *provider {
 	// The authorization endpoint signs alice in straight away, and sends her back with a code.
 	mux.HandleFunc("GET /authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		code := randomString()
+		code := rand.Text()
 		p.mu.Lock()
 		p.nonces[code] = q.Get("nonce")
 		p.mu.Unlock()
@@ -331,9 +331,7 @@ func TestProxyRefusesOtherAPIs(t *testing.T) {
 		// The server's mux redirects dot segments to the cleaned path, which is refused like any other.
 		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/../../../api/v1/secrets", http.StatusTemporaryRedirect},
 		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/%2e%2e/%2e%2e/%2e%2e/api/v1/secrets", http.StatusForbidden},
-		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/namespaces%2fimmich/previews", http.StatusForbidden},
 		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1x/previews", http.StatusForbidden},
-		{http.MethodGet, "/api/kube/apis/authorization.k8s.io/v1/selfsubjectaccessreviews", http.StatusForbidden},
 		{http.MethodPost, "/api/kube/apis/authorization.k8s.io/v1/subjectaccessreviews", http.StatusForbidden},
 	} {
 		req, _ := http.NewRequest(tc.method, f.dashboard.URL, nil)

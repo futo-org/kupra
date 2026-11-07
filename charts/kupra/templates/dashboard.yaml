@@ -78,17 +78,36 @@ spec:
           args:
             - --bind-address=:8080
             - --public-url={{ required "dashboard.publicURL is required" .publicURL }}
-            - --oidc-issuer-url={{ required "dashboard.oidc.issuerURL is required" .oidc.issuerURL }}
-            - --oidc-client-id={{ required "dashboard.oidc.clientID is required" .oidc.clientID }}
+            # ko puts the built page, from cmd/dashboard/kodata, here in the image.
+            - --static-dir=/var/run/ko
+            {{- with .oidc.issuerURL }}
+            - --oidc-issuer-url={{ . }}
+            {{- end }}
+            {{- with .oidc.clientID }}
+            - --oidc-client-id={{ . }}
+            {{- end }}
             - --oidc-scopes={{ join "," .oidc.scopes }}
             {{- with .extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
-            - name: OIDC_CLIENT_SECRET
+            # issuerURL and clientID can come from the Secret instead of values.
+            - name: OIDC_ISSUER_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ required "dashboard.existingSecret is required" .existingSecret }}
+                  key: issuer-url
+                  optional: true
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: client-id
+                  optional: true
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
                   key: client-secret
             - name: COOKIE_SECRET
               valueFrom:

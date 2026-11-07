@@ -47,6 +47,9 @@ kubectl -n kupra-system create secret generic kupra-dashboard \
   --from-literal=client-secret=<secret> --from-literal=cookie-secret="$(openssl rand -base64 32)"
 ```
 
+
+The issuer URL and client ID can go in the Secret too, as `issuer-url` and `client-id`, instead of the values below.
+
 ```yaml
 dashboard:
   enabled: true

@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -82,8 +81,8 @@ func (a *authenticator) context(ctx context.Context) context.Context {
 // login sends the browser to the identity provider.
 func (a *authenticator) login(w http.ResponseWriter, r *http.Request) {
 	l := login{
-		State:    randomString(),
-		Nonce:    randomString(),
+		State:    rand.Text(),
+		Nonce:    rand.Text(),
 		Verifier: oauth2.GenerateVerifier(),
 		Redirect: localRedirect(r.URL.Query().Get("redirect")),
 	}
@@ -244,10 +243,4 @@ func localRedirect(target string) string {
 		return "/"
 	}
 	return target
-}
-
-func randomString() string {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
 }

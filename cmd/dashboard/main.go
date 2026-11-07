@@ -21,10 +21,10 @@ func main() {
 	var addr, publicURL, issuerURL, clientID, scopes, staticDir string
 	flag.StringVar(&addr, "bind-address", ":8080", "The address the dashboard serves on.")
 	flag.StringVar(&publicURL, "public-url", "", "The URL people reach the dashboard at.")
-	flag.StringVar(&issuerURL, "oidc-issuer-url", "", "The OIDC provider's issuer URL.")
-	flag.StringVar(&clientID, "oidc-client-id", "", "The dashboard's OIDC client ID.")
+	flag.StringVar(&issuerURL, "oidc-issuer-url", os.Getenv("OIDC_ISSUER_URL"), "The OIDC provider's issuer URL. Defaults to $OIDC_ISSUER_URL.")
+	flag.StringVar(&clientID, "oidc-client-id", os.Getenv("OIDC_CLIENT_ID"), "The dashboard's OIDC client ID. Defaults to $OIDC_CLIENT_ID.")
 	flag.StringVar(&scopes, "oidc-scopes", "openid,profile,email,groups,offline_access", "The scopes to request, comma-separated.")
-	flag.StringVar(&staticDir, "static-dir", os.Getenv("KO_DATA_PATH"), "The directory holding the built page.")
+	flag.StringVar(&staticDir, "static-dir", "", "The directory holding the built page.")
 	logOpts := zap.Options{}
 	logOpts.BindFlags(flag.CommandLine)
 	flag.Parse()

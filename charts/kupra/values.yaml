@@ -93,6 +93,7 @@ dashboard:
   # Where people reach the dashboard, such as https://previews.example.com. The provider must allow <publicURL>/auth/callback as a redirect.
   publicURL: ""
   oidc:
+    # issuerURL and clientID can instead be in existingSecret, as issuer-url and client-id.
     issuerURL: ""
     clientID: ""
     scopes: [openid, profile, email, groups, offline_access]
