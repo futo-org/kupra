@@ -2,6 +2,7 @@
 
 import { untrack } from 'svelte';
 import { request } from './api.ts';
+import { chunk, maxCollections } from './collections.ts';
 import type { ObjectMeta, Preview, PreviewApp, PreviewSnapshot, Status } from './kube/types.ts';
 
 /** Objects are the objects in each kind of collection. Collections are named like previews/<namespace>. */
@@ -108,8 +109,17 @@ class Store {
     }
   };
 
-  /** connect streams these collections until the returned function is called. */
+  /** connect streams these collections until the returned function is called, over as many connections as the backend's limit takes. */
   connect = (names: string[]) => {
+    const stops = chunk(names, maxCollections).map((group) => this.#stream(group));
+    return () => {
+      for (const stop of stops) {
+        stop();
+      }
+    };
+  };
+
+  #stream = (names: string[]) => {
     let source: EventSource | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
