@@ -10,7 +10,8 @@
     Switch,
     type SelectOption,
   } from '@immich/ui';
-  import { withParameter } from '#lib/kube/preview.ts';
+  import { dnsLabelError } from '#lib/kube/names.ts';
+  import { missingParameters, parameterDefaults, parameterInput, withParameter } from '#lib/kube/preview.ts';
   import { apiVersion, type Preview, type PreviewApp } from '#lib/kube/types.ts';
   import { findPreview, restoreLabel, snapshotsOf } from '#lib/model.ts';
 
@@ -55,8 +56,9 @@
     if (preview || name === '') {
       return;
     }
-    if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name) || name.length > 63) {
-      return "must consist of lower case alphanumeric characters or '-', and start and end with one";
+    const invalid = dnsLabelError(name);
+    if (invalid) {
+      return invalid;
     }
     if (findPreview(namespace, name)) {
       return 'already exists';
@@ -67,7 +69,7 @@
   const initial = () => ({
     name: preview?.metadata?.name ?? '',
     values: {
-      ...Object.fromEntries(parameters.flatMap(({ name, default: value }) => (value ? [[name, value]] : []))),
+      ...parameterDefaults(parameters),
       ...preview?.spec.parameters,
     } as Record<string, string>,
     restore: preview ? restoreValue(preview) : 'empty',
@@ -77,9 +79,9 @@
   let values = $state(start.values);
   let restore = $state(start.restore);
 
-  const valueOf = (name: string) => values[name] ?? '';
+  const valueOf = (name: string) => (Object.hasOwn(values, name) ? values[name] : undefined) ?? '';
 
-  const missing = $derived(parameters.some((parameter) => parameter.required && valueOf(parameter.name) === ''));
+  const missing = $derived(missingParameters(parameters, values).length > 0);
 
   const onSubmit = () => {
     const restoreFrom = restore.startsWith('name:')
@@ -111,28 +113,27 @@
 
     {#each parameters as parameter (parameter.name)}
       {@const required = parameter.required ? 'indicator' : false}
-      {#if parameter.type === 'boolean'}
-        <Field label={parameter.title} description={parameter.description}>
-          <Switch
-            checked={values[parameter.name] === 'true'}
-            onCheckedChange={(checked) => (values[parameter.name] = String(checked))}
+      {@const input = parameterInput(parameter)}
+      {#if input === 'enum'}
+        <Field label={parameter.title} description={parameter.description} {required}>
+          <Select
+            options={parameter.enum ?? []}
+            bind:value={() => valueOf(parameter.name), (value) => (values = withParameter(values, parameter, value))}
           />
         </Field>
-      {:else if parameter.type === 'integer'}
+      {:else if input === 'boolean'}
+        <Field label={parameter.title} description={parameter.description}>
+          <Switch
+            checked={valueOf(parameter.name) === 'true'}
+            onCheckedChange={(checked) => (values = withParameter(values, parameter, String(checked)))}
+          />
+        </Field>
+      {:else if input === 'integer'}
         <Field label={parameter.title} description={parameter.description} {required}>
           <NumberInput
             bind:value={
               () => (valueOf(parameter.name) === '' ? undefined : Number(valueOf(parameter.name))),
               (value) => (values = withParameter(values, parameter, value === undefined ? '' : String(value)))
-            }
-          />
-        </Field>
-      {:else if parameter.enum}
-        <Field label={parameter.title} description={parameter.description} {required}>
-          <Select
-            options={parameter.enum}
-            bind:value={
-              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter, value))
             }
           />
         </Field>
@@ -145,9 +146,7 @@
           {required}
         >
           <Input
-            bind:value={
-              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter, value))
-            }
+            bind:value={() => valueOf(parameter.name), (value) => (values = withParameter(values, parameter, value))}
           />
         </Field>
       {/if}

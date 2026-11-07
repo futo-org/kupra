@@ -37,9 +37,14 @@ export const phaseColor = (phase: Phase | undefined): Color => {
 export type Owner = {
   kind: string;
   name: string;
+  /** namespace is a ServiceAccount's namespace. */
+  namespace?: string;
   /** creator is set for whoever created the Preview. */
   creator: boolean;
 };
+
+const sameOwner = (a: Omit<Owner, 'creator'>, b: Omit<Owner, 'creator'>) =>
+  a.kind === b.kind && a.name === b.name && (a.namespace ?? '') === (b.namespace ?? '');
 
 /** owners returns a Preview's owners: whoever created it, then its spec.owners. */
 export const owners = (preview: Preview): Owner[] => {
@@ -48,9 +53,10 @@ export const owners = (preview: Preview): Owner[] => {
   if (createdBy) {
     result.push({ kind: 'User', name: createdBy, creator: true });
   }
-  for (const { kind, name } of preview.spec.owners ?? []) {
-    if (result.every((owner) => owner.kind !== kind || owner.name !== name)) {
-      result.push({ kind, name, creator: false });
+  for (const { kind, name, namespace } of preview.spec.owners ?? []) {
+    const owner = kind === 'ServiceAccount' ? { kind, name, namespace } : { kind, name };
+    if (result.every((other) => !sameOwner(other, owner))) {
+      result.push({ ...owner, creator: false });
     }
   }
   return result;
@@ -75,7 +81,8 @@ export const parameterRows = (preview: Preview, app: PreviewApp | undefined): Pa
   const declared = app?.spec.parameters ?? [];
   const rows: ParameterRow[] = [];
   for (const parameter of declared) {
-    const value = values[parameter.name];
+    // Otherwise a parameter named like an inherited method, such as constructor, would find that method.
+    const value = Object.hasOwn(values, parameter.name) ? values[parameter.name] : undefined;
     if (value !== undefined) {
       rows.push({ name: parameter.name, title: parameter.title, value, isDefault: false });
     } else if (parameter.default !== undefined) {
@@ -91,8 +98,13 @@ export const parameterRows = (preview: Preview, app: PreviewApp | undefined): Pa
   return rows;
 };
 
-/** ownerLabel returns how the dashboard names an owner: users by name, and others by kind and name. */
-export const ownerLabel = ({ kind, name }: Owner) => (kind === 'User' ? name : `${kind} ${name}`);
+/** ownerLabel returns how the dashboard names an owner: users by name, service accounts by namespace/name, and others by kind and name. */
+export const ownerLabel = ({ kind, name, namespace }: Owner) => {
+  if (kind === 'User') {
+    return name;
+  }
+  return kind === 'ServiceAccount' ? `${kind} ${namespace}/${name}` : `${kind} ${name}`;
+};
 
 /** withParameter returns a Preview's parameter values with one set. An empty integer is left out, so the PreviewApp's default applies; an empty string is a value of its own. */
 export const withParameter = (
@@ -103,3 +115,20 @@ export const withParameter = (
   const { [name]: _, ...rest } = values;
   return value === '' && type === 'integer' ? rest : { ...rest, [name]: value };
 };
+
+/** Parameter is one of a PreviewApp's parameters. */
+export type Parameter = NonNullable<PreviewApp['spec']['parameters']>[number];
+
+/** parameterDefaults returns the values a new Preview starts with: the PreviewApp's defaults, empty ones included. */
+export const parameterDefaults = (parameters: Parameter[]) =>
+  Object.fromEntries(parameters.flatMap(({ name, default: value }) => (value === undefined ? [] : [[name, value]])));
+
+/** missingParameters returns the required parameters that have neither a value nor a default. An empty value counts. */
+export const missingParameters = (parameters: Parameter[], values: Record<string, string>) =>
+  parameters.filter(
+    (parameter) => parameter.required && !Object.hasOwn(values, parameter.name) && parameter.default === undefined,
+  );
+
+/** parameterInput returns which input a parameter gets. An enum limits any type to its values. */
+export const parameterInput = ({ enum: values, type = 'string' }: Parameter) =>
+  values?.length ? 'enum' : (type ?? 'string');
