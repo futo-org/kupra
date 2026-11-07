@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createdByAnnotation, ownerLabel, owners, parameterRows, phaseColor } from './preview.ts';
+import { createdByAnnotation, ownerLabel, owners, parameterRows, phaseColor, withParameter } from './preview.ts';
 import type { Preview, PreviewApp } from './types.ts';
 
 const preview = (spec: Partial<Preview['spec']> = {}, annotations?: Record<string, string>): Preview => ({
@@ -74,5 +74,15 @@ describe(phaseColor.name, () => {
     expect(phaseColor('Failed')).toBe('danger');
     expect(phaseColor('Provisioning')).toBe('info');
     expect(phaseColor(undefined)).toBe('secondary');
+  });
+});
+
+describe(withParameter.name, () => {
+  it('sets a value', () => {
+    expect(withParameter({ tag: 'main' }, 'workers', '2')).toEqual({ tag: 'main', workers: '2' });
+  });
+
+  it('leaves out a cleared value, so the default applies rather than an invalid empty integer', () => {
+    expect(withParameter({ tag: 'main', workers: '2' }, 'workers', '')).toEqual({ tag: 'main' });
   });
 });

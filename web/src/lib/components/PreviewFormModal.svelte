@@ -10,6 +10,7 @@
     Switch,
     type SelectOption,
   } from '@immich/ui';
+  import { withParameter } from '#lib/kube/preview.ts';
   import { apiVersion, type Preview, type PreviewApp } from '#lib/kube/types.ts';
   import { findPreview, restoreLabel, snapshotsOf } from '#lib/model.ts';
 
@@ -122,7 +123,7 @@
           <NumberInput
             bind:value={
               () => (valueOf(parameter.name) === '' ? undefined : Number(valueOf(parameter.name))),
-              (value) => (values[parameter.name] = value === undefined ? '' : String(value))
+              (value) => (values = withParameter(values, parameter.name, value === undefined ? '' : String(value)))
             }
           />
         </Field>
@@ -130,7 +131,9 @@
         <Field label={parameter.title} description={parameter.description} {required}>
           <Select
             options={parameter.enum}
-            bind:value={() => values[parameter.name] ?? '', (value) => (values[parameter.name] = value)}
+            bind:value={
+              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter.name, value))
+            }
           />
         </Field>
       {:else}
@@ -141,7 +144,11 @@
           description={parameter.description ?? (repository && `Tag of ${repository}`)}
           {required}
         >
-          <Input bind:value={() => values[parameter.name] ?? '', (value) => (values[parameter.name] = value)} />
+          <Input
+            bind:value={
+              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter.name, value))
+            }
+          />
         </Field>
       {/if}
     {/each}
