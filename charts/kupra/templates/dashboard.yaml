@@ -84,6 +84,9 @@ spec:
             {{- with .oidc.clientID }}
             - --oidc-client-id={{ . }}
             {{- end }}
+            {{- if .oidc.caConfigMap }}
+            - --oidc-ca-file=/etc/kupra/oidc-ca/ca.crt
+            {{- end }}
             - --oidc-scopes={{ join "," .oidc.scopes }}
             {{- with .extraArgs }}
             {{- toYaml . | nindent 12 }}
@@ -118,12 +121,24 @@ spec:
             httpGet:
               path: /healthz
               port: http
+          {{- if .oidc.caConfigMap }}
+          volumeMounts:
+            - name: oidc-ca
+              mountPath: /etc/kupra/oidc-ca
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .resources | nindent 12 }}
           {{- with .securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- with .oidc.caConfigMap }}
+      volumes:
+        - name: oidc-ca
+          configMap:
+            name: {{ . }}
+      {{- end }}
       {{- with .nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
