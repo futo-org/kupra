@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -403,5 +404,44 @@ func TestDeleteBeforeNamespaceCached(t *testing.T) {
 	}
 	if err := live.Get(ctx, client.ObjectKeyFromObject(ns), &corev1.Namespace{}); !apierrors.IsNotFound(err) {
 		t.Errorf("namespace: %v, want it deleted", err)
+	}
+}
+
+// A workload the preview's account may no longer delete doesn't stop the rest of its resources being deleted before its namespace.
+func TestRemoveContentPastForbidden(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	config := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "config"}}
+	data := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "data"}}
+	live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(config, data).Build()
+	applier := interceptor.NewClient(live, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if obj.GetName() == "config" {
+				return apierrors.NewForbidden(corev1.Resource("configmaps"), obj.GetName(), nil)
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+	inventory := []kuprav1alpha1.InventoryEntry{
+		{TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: "ConfigMap", Name: "config"}},
+		{TypedLocalObjectReference: corev1.TypedLocalObjectReference{Kind: "PersistentVolumeClaim", Name: "data"}, State: true},
+	}
+	mapper := apimeta.NewDefaultRESTMapper([]schema.GroupVersion{corev1.SchemeGroupVersion})
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("ConfigMap"), apimeta.RESTScopeNamespace)
+	mapper.Add(corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"), apimeta.RESTScopeNamespace)
+	r := &PreviewReconciler{Client: live, Mapper: mapper}
+	for range 2 {
+		_, err := r.removeContent(ctx, applier, "ns", inventory)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The fake client keeps foreground deletions pending, as there is no garbage collector.
+	var got corev1.PersistentVolumeClaim
+	if err := live.Get(ctx, client.ObjectKeyFromObject(data), &got); !apierrors.IsNotFound(err) && got.DeletionTimestamp.IsZero() {
+		t.Errorf("claim data isn't being deleted (%v), want it deleted although ConfigMap config can't be", err)
 	}
 }

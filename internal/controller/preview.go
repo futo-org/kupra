@@ -723,9 +723,15 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 		gone = true
 	case ns.DeletionTimestamp.IsZero():
 		// The preview's own resources go first, workloads before their state, as in a reset. The namespace controller has been seen to skip a CloudNativePG cluster and its claims, leaving the namespace deleting forever.
-		removed, err := r.removeContent(ctx, p, nsName)
-		if err != nil {
-			return ctrl.Result{}, false, err
+		removed := true
+		if len(p.Status.Inventory) > 0 {
+			applier, err := r.impersonate(nsName)
+			if err != nil {
+				return ctrl.Result{}, false, err
+			}
+			if removed, err = r.removeContent(ctx, applier, nsName, p.Status.Inventory); err != nil {
+				return ctrl.Result{}, false, err
+			}
 		}
 		if !removed {
 			message := fmt.Sprintf("deleting the preview's resources in namespace %s", nsName)
