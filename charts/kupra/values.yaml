@@ -86,3 +86,48 @@ defaultPolicy:
   namespaceMetadata:
     labels:
       pod-security.kubernetes.io/enforce: baseline
+
+# The dashboard (ADR 7). It signs people in with an OIDC provider that the API server also trusts, and acts as them.
+dashboard:
+  enabled: false
+  # Where people reach the dashboard, such as https://previews.example.com. The provider must allow <publicURL>/auth/callback as a redirect.
+  publicURL: ""
+  oidc:
+    issuerURL: ""
+    clientID: ""
+    scopes: [openid, profile, email, groups, offline_access]
+  # A Secret with the OIDC client's secret in client-secret, and at least 32 random characters in cookie-secret, which encrypts sessions.
+  existingSecret: ""
+  replicas: 1
+  image:
+    repository: ghcr.io/futo-org/kupra-dashboard
+    tag: ""
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+  extraArgs: []
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
