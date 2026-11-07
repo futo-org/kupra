@@ -16,16 +16,16 @@ import (
 // TestNamespacesWithAppsAreLabelled checks that a namespace is labelled while it contains PreviewApps, and that removing the label, whoever set it, leaves its other labels alone.
 func TestNamespacesWithAppsAreLabelled(t *testing.T) {
 	ctx := context.Background()
-	createNamespace(t, "has-apps", map[string]string{"team": "a", kuprav1alpha1.LabelHasApps: "true"})
+	createNamespace(t, "with-apps", map[string]string{"team": "a", kuprav1alpha1.LabelAppNamespace: ""})
 	labelled := func(want bool) {
 		t.Helper()
 		eventually(t, func() error {
 			var ns corev1.Namespace
-			if err := k8s.Get(ctx, client.ObjectKey{Name: "has-apps"}, &ns); err != nil {
+			if err := k8s.Get(ctx, client.ObjectKey{Name: "with-apps"}, &ns); err != nil {
 				return err
 			}
-			if _, got := ns.Labels[kuprav1alpha1.LabelHasApps]; got != want {
-				return fmt.Errorf("namespace has %s %t, want %t", kuprav1alpha1.LabelHasApps, got, want)
+			if _, got := ns.Labels[kuprav1alpha1.LabelAppNamespace]; got != want {
+				return fmt.Errorf("namespace labelled %s is %t, want %t", kuprav1alpha1.LabelAppNamespace, got, want)
 			}
 			if ns.Labels["team"] != "a" {
 				return fmt.Errorf("namespace's team label is %q, want it kept as a", ns.Labels["team"])
@@ -35,8 +35,8 @@ func TestNamespacesWithAppsAreLabelled(t *testing.T) {
 	}
 	labelled(false)
 
-	first := createApp(t, "has-apps", "first", "template: {resources: []}")
-	second := createApp(t, "has-apps", "second", "template: {resources: []}")
+	first := createApp(t, "with-apps", "first", "template: {resources: []}")
+	second := createApp(t, "with-apps", "second", "template: {resources: []}")
 	labelled(true)
 
 	if err := k8s.Delete(ctx, first); err != nil {

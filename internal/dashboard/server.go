@@ -123,7 +123,7 @@ func (h *handler) appNamespaces(w http.ResponseWriter, r *http.Request) {
 		authError(w, r, err)
 		return
 	}
-	list, err := h.own.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{LabelSelector: kuprav1alpha1.LabelHasApps})
+	list, err := h.own.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{LabelSelector: kuprav1alpha1.LabelAppNamespace})
 	if err != nil {
 		httpError(w, r, http.StatusBadGateway, err)
 		return

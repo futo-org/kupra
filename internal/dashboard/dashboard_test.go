@@ -268,8 +268,8 @@ func TestSignInAndProxy(t *testing.T) {
 		t.Errorf("app namespaces are %d %s, want immich", code, body)
 	}
 	got = f.api.last()
-	if got.URL.Query().Get("labelSelector") != kuprav1alpha1.LabelHasApps || got.Header.Get("Authorization") != "Bearer dashboard-token" {
-		t.Errorf("namespaces were listed with selector %q and Authorization %q, want %s with the dashboard's own token", got.URL.Query().Get("labelSelector"), got.Header.Get("Authorization"), kuprav1alpha1.LabelHasApps)
+	if got.URL.Query().Get("labelSelector") != kuprav1alpha1.LabelAppNamespace || got.Header.Get("Authorization") != "Bearer dashboard-token" {
+		t.Errorf("namespaces were listed with selector %q and Authorization %q, want %s with the dashboard's own token", got.URL.Query().Get("labelSelector"), got.Header.Get("Authorization"), kuprav1alpha1.LabelAppNamespace)
 	}
 
 	code, _ = f.do(t, http.MethodPost, "/auth/logout", nil)
