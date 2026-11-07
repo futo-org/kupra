@@ -30,10 +30,14 @@ func finishDeletions(t *testing.T, namespace string) {
 	ctx := context.Background()
 	var cms corev1.ConfigMapList
 	var pvcs corev1.PersistentVolumeClaimList
+	var services corev1.ServiceList
 	if err := k8s.List(ctx, &cms, client.InNamespace(namespace)); err != nil {
 		t.Fatal(err)
 	}
 	if err := k8s.List(ctx, &pvcs, client.InNamespace(namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8s.List(ctx, &services, client.InNamespace(namespace)); err != nil {
 		t.Fatal(err)
 	}
 	var objs []client.Object
@@ -42,6 +46,9 @@ func finishDeletions(t *testing.T, namespace string) {
 	}
 	for i := range pvcs.Items {
 		objs = append(objs, &pvcs.Items[i])
+	}
+	for i := range services.Items {
+		objs = append(objs, &services.Items[i])
 	}
 	for _, obj := range objs {
 		if obj.GetDeletionTimestamp().IsZero() || len(obj.GetFinalizers()) == 0 {

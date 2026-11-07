@@ -674,3 +674,22 @@ func (r *PreviewReconciler) heldSnapshot(ctx context.Context, p *kuprav1alpha1.P
 	}
 	return "", nil
 }
+
+// removeContent deletes the resources a preview applied to its namespace, workloads before their state, and reports whether they're gone. Resources the preview's account may no longer delete are left to the namespace's deletion.
+func (r *PreviewReconciler) removeContent(ctx context.Context, p *kuprav1alpha1.Preview, namespace string) (bool, error) {
+	if len(p.Status.Inventory) == 0 {
+		return true, nil
+	}
+	applier, err := r.impersonate(namespace)
+	if err != nil {
+		return false, err
+	}
+	gone, err := r.remove(ctx, applier, namespace, workloadEntries(p.Status.Inventory))
+	if err == nil && gone {
+		gone, err = r.remove(ctx, applier, namespace, stateEntries(p.Status.Inventory))
+	}
+	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+		return true, nil
+	}
+	return gone, err
+}

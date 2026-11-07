@@ -722,6 +722,17 @@ func (r *PreviewReconciler) reconcileDelete(ctx context.Context, p *kuprav1alpha
 	case ns.Annotations[AnnotationPreviewUID] != string(p.UID):
 		gone = true
 	case ns.DeletionTimestamp.IsZero():
+		// The preview's own resources go first, workloads before their state, as in a reset. The namespace controller has been seen to skip a CloudNativePG cluster and its claims, leaving the namespace deleting forever.
+		removed, err := r.removeContent(ctx, p, nsName)
+		if err != nil {
+			return ctrl.Result{}, false, err
+		}
+		if !removed {
+			message := fmt.Sprintf("deleting the preview's resources in namespace %s", nsName)
+			conditions.MarkFalse(p, meta.ReadyCondition, ReasonTerminating, "%s", message)
+			markReconciling(p, ReasonTerminating, message)
+			return ctrl.Result{RequeueAfter: startingInterval}, false, nil
+		}
 		// The UID keeps a stale read from deleting a namespace that replaced the preview's.
 		if err := client.IgnoreNotFound(r.Delete(ctx, &ns, client.Preconditions{UID: &ns.UID})); err != nil {
 			return ctrl.Result{}, false, err
