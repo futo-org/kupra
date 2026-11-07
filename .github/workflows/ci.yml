@@ -38,6 +38,34 @@ jobs:
       - name: Run integration tests
         run: mise run test:integration
 
+  dashboard:
+    name: Dashboard frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup mise
+        uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+
+      - name: Check generated types are up to date
+        run: |
+          mise run web:generate
+          git add --intent-to-add web/src
+          git diff --exit-code web/src
+
+      - name: Run checks
+        run: mise run web:check
+
+      - name: Run tests
+        run: mise run web:test
+
+      - name: Build
+        run: mise run web:build
+
   e2e:
     name: End-to-end tests
     runs-on: ubuntu-latest

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Type-check, lint and check the formatting of the dashboard frontend"
+#MISE depends=["web:install"]
+set -euo pipefail
+
+cd web
+pnpm run check:svelte
+pnpm run lint
+pnpm run format
