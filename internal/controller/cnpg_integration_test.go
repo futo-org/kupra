@@ -131,8 +131,16 @@ template:
 	if err := k8s.Get(ctx, client.ObjectKey{Namespace: sourceNS, Name: "kupra-api-server"}, &np); err != nil {
 		t.Fatal(err)
 	}
-	if len(np.Spec.Egress) != 1 || len(np.Spec.Egress[0].To) == 0 || np.Spec.Egress[0].To[0].IPBlock == nil || len(np.Spec.Egress[0].Ports) == 0 {
-		t.Errorf("API server policy has %d egress rules, want one with the API server's addresses and ports", len(np.Spec.Egress))
+	if len(np.Spec.Egress) != 1 {
+		t.Errorf("API server policy has %d egress rules, want one", len(np.Spec.Egress))
+	} else {
+		rule := np.Spec.Egress[0]
+		if len(rule.To) == 0 || rule.To[0].IPBlock == nil {
+			t.Errorf("API server policy's egress rule has %d destinations, want the API server's addresses as IP blocks", len(rule.To))
+		}
+		if len(rule.Ports) == 0 {
+			t.Error("API server policy's egress rule allows every port, want the API server's ports")
+		}
 	}
 	if len(np.Spec.PodSelector.MatchExpressions) != 1 || np.Spec.PodSelector.MatchExpressions[0].Key != "cnpg.io/cluster" {
 		t.Errorf("API server policy selects %s, want CloudNativePG's pods", metav1.FormatLabelSelector(&np.Spec.PodSelector))

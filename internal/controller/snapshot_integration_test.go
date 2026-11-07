@@ -185,7 +185,7 @@ template:
 			t.Errorf("source content's deletion policy = %s, want Retain", sourceContent.Spec.DeletionPolicy)
 		}
 		if owners := moved.OwnerReferences; len(owners) != 1 || owners[0].UID != snap.UID {
-			t.Errorf("moved VolumeSnapshot is owned by %s, want only PreviewSnapshot %s", testutil.Owners(owners), snap.Name)
+			t.Errorf("moved VolumeSnapshot is owned by %s, want only PreviewSnapshot %s (%s)", testutil.Owners(owners), snap.Name, snap.UID)
 		}
 		bindSnapshot(t, moved, *moved.Spec.Source.VolumeSnapshotContentName)
 

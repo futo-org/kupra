@@ -44,20 +44,31 @@ func Inventory(entries []kuprav1alpha1.InventoryEntry) string {
 	var parts []string
 	for _, e := range entries {
 		s := e.Kind + " " + e.Name
+		var marks []string
 		if e.State {
-			s += " (state)"
+			marks = append(marks, "state")
+		}
+		if e.Retained {
+			marks = append(marks, "retained")
+		}
+		if len(marks) > 0 {
+			s += " (" + strings.Join(marks, ", ") + ")"
 		}
 		parts = append(parts, s)
 	}
 	return strings.Join(parts, ", ")
 }
 
-// Subject describes an RBAC subject for a test's failure message.
+// Subject describes an RBAC subject for a test's failure message, with its kind qualified by any API group.
 func Subject(s rbacv1.Subject) string {
-	if s.Namespace != "" {
-		return s.Kind + " " + s.Namespace + "/" + s.Name
+	kind := s.Kind
+	if s.APIGroup != "" {
+		kind += "." + s.APIGroup
 	}
-	return s.Kind + " " + s.Name
+	if s.Namespace != "" {
+		return kind + " " + s.Namespace + "/" + s.Name
+	}
+	return kind + " " + s.Name
 }
 
 // DataSource describes a claim's data source for a test's failure message.
@@ -92,14 +103,14 @@ func Captures(captures []kuprav1alpha1.Capture) string {
 	return strings.Join(parts, "; ")
 }
 
-// Owners describes owner references for a test's failure message.
+// Owners describes owner references for a test's failure message, with their UIDs.
 func Owners(owners []metav1.OwnerReference) string {
 	if len(owners) == 0 {
 		return "none"
 	}
 	var parts []string
 	for _, o := range owners {
-		parts = append(parts, o.Kind+" "+o.Name)
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", o.Kind, o.Name, o.UID))
 	}
 	return strings.Join(parts, ", ")
 }
