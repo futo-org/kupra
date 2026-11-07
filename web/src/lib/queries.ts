@@ -26,10 +26,13 @@ export const sessionQuery = queryOptions({
   staleTime: Infinity,
 });
 
-/** accessQuery asks the API server whether the user may do something, with a SelfSubjectAccessReview. */
-export const accessQuery = (attributes: ResourceAttributes) =>
+/** accessQuery asks the API server whether the user may do something, with a SelfSubjectAccessReview. It asks again when revision changes. */
+export const accessQuery = (attributes: ResourceAttributes, revision = '') =>
   queryOptions({
-    queryKey: ['access', attributes],
+    queryKey: ['access', attributes, revision],
+    // While it asks again, the previous answer about the same action stands, so actions don't flicker.
+    placeholderData: (previous, previousQuery) =>
+      JSON.stringify(previousQuery?.queryKey[1]) === JSON.stringify(attributes) ? previous : undefined,
     queryFn: async () => {
       const review = await kube<SelfSubjectAccessReview>(
         '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews',
