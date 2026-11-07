@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Serve the dashboard at http://localhost:8080 against a local API server with sample data, signed in as oidc:alice"
+#MISE depends=["web:build"]
+set -euo pipefail
+
+k8s_minor="$(go list -m -f '{{.Version}}' k8s.io/api | cut -d. -f2)"
+KUBEBUILDER_ASSETS="$(setup-envtest use --print path "1.$k8s_minor")"
+export KUBEBUILDER_ASSETS KUPRA_DASHBOARD_DEV=1
+exec go test -tags integration -run '^TestDevServer$' -count=1 -timeout 0 -v ./internal/dashboard

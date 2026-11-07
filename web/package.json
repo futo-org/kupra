@@ -16,7 +16,7 @@
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "test": "vitest run",
-    "mockup:screenshots": "node scripts/mockup/screenshots.ts"
+    "screenshots": "node scripts/screenshots.ts"
   },
   "crd-generate": {
     "input": [
