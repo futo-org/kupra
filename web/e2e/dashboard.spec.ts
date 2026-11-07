@@ -65,10 +65,15 @@ test('creator creates, resets and deletes a preview', async ({ page }) => {
 test('viewer sees previews without actions', async ({ page }) => {
   // The page shows actions once the API server allows them, so their absence only counts once it has answered.
   const reviews: boolean[] = [];
-  page.on('response', async (response) => {
+  page.on('response', (response) => {
     if (response.url().endsWith('/selfsubjectaccessreviews') && response.ok()) {
-      const review = (await response.json()) as { status?: { allowed?: boolean } };
-      reviews.push(review.status?.allowed ?? false);
+      response
+        .json()
+        .then((review: { status?: { allowed?: boolean } }) => {
+          reviews.push(review.status?.allowed ?? false);
+        })
+        // Responses to a page that has navigated away have no body.
+        .catch(() => {});
     }
   });
 
