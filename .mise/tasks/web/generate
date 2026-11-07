@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Generate the dashboard frontend's TypeScript types from the CRDs"
+#MISE depends=["web:install"]
+set -euo pipefail
+
+cd web
+# crd-generate reads its input and output from package.json's crd-generate key. Its models are compiled to declarations,
+# as the page only uses their types.
+rm -rf node_modules/.cache/crd-generate src/lib/kube/gen
+pnpm exec crd-generate
+pnpm exec tsc6 -p tsconfig.gen.json

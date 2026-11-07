@@ -1,0 +1,156 @@
+{{- with .Values.dashboard }}
+{{- if .enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kupra-dashboard
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kupra.dashboard.labels" $ | nindent 4 }}
+---
+# The dashboard's only permission of its own: finding and watching the namespaces with apps. Everything else it does as its users (ADR 7).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kupra-dashboard
+  labels:
+    {{- include "kupra.clusterRoleLabels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kupra-dashboard
+  labels:
+    {{- include "kupra.dashboard.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kupra-dashboard
+subjects:
+  - kind: ServiceAccount
+    name: kupra-dashboard
+    namespace: {{ $.Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kupra-dashboard
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kupra.dashboard.labels" $ | nindent 4 }}
+spec:
+  # One pod at a time, also while updating: pods don't share refreshes, and providers that rotate refresh tokens accept each once, so two pods refreshing the same session would sign its user out.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kupra.dashboard.selectorLabels" $ | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kupra.labelsWith" (dict "ctx" $ "labels" (include "kupra.dashboard.selectorLabels" $ | fromYaml) "extra" .podLabels) | nindent 8 }}
+      {{- with .podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: kupra-dashboard
+      {{- with .imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dashboard
+          image: "{{ .image.repository }}:{{ .image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ .image.pullPolicy }}
+          args:
+            - --bind-address=:8080
+            - --public-url={{ required "dashboard.publicURL is required" .publicURL }}
+            {{- with .oidc.issuerURL }}
+            - --oidc-issuer-url={{ . }}
+            {{- end }}
+            {{- with .oidc.clientID }}
+            - --oidc-client-id={{ . }}
+            {{- end }}
+            - --oidc-scopes={{ join "," .oidc.scopes }}
+            {{- with .extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            # issuerURL and clientID can come from the Secret instead of values.
+            - name: OIDC_ISSUER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "dashboard.existingSecret is required" .existingSecret }}
+                  key: issuer-url
+                  optional: true
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: client-id
+                  optional: true
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: client-secret
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          {{- with .securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kupra-dashboard
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kupra.dashboard.labels" $ | nindent 4 }}
+spec:
+  type: {{ .service.type }}
+  selector:
+    {{- include "kupra.dashboard.selectorLabels" $ | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .service.port }}
+      targetPort: http
+{{- end }}
+{{- end }}
