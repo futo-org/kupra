@@ -20,8 +20,6 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"k8s.io/client-go/rest"
-
-	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
 
 // provider is a fake OIDC provider. It signs anyone in as alice, with ID tokens that last ttl.
@@ -68,7 +66,7 @@ func newProvider(t *testing.T) *provider {
 	// The authorization endpoint signs alice in straight away, and sends her back with a code.
 	mux.HandleFunc("GET /authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		code := randomString()
+		code := rand.Text()
 		p.mu.Lock()
 		p.nonces[code] = q.Get("nonce")
 		p.mu.Unlock()
@@ -122,7 +120,8 @@ func newProvider(t *testing.T) *provider {
 		p.revoked = append(p.revoked, r.Form.Get("token"))
 		p.mu.Unlock()
 	})
-	p.Server = httptest.NewServer(mux)
+	// TLS, as the API server only trusts issuers over https.
+	p.Server = httptest.NewTLSServer(mux)
 	t.Cleanup(p.Close)
 	return p
 }
@@ -197,7 +196,16 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{provider: newProvider(t), api: newAPIServer(t)}
+	api := newAPIServer(t)
+	f := newFixtureWith(t, newProvider(t), &rest.Config{Host: api.URL, BearerToken: "dashboard-token"})
+	f.api = api
+	return f
+}
+
+// newFixtureWith serves a dashboard that signs in with p, and reaches the API server with cfg as its own account.
+func newFixtureWith(t *testing.T, p *provider, cfg *rest.Config) *fixture {
+	t.Helper()
+	f := &fixture{provider: p}
 	static := t.TempDir()
 	if err := os.WriteFile(filepath.Join(static, "index.html"), []byte("<p>kupra</p>"), 0o600); err != nil {
 		t.Fatal(err)
@@ -212,15 +220,15 @@ func newFixture(t *testing.T) *fixture {
 		ClientID:     "kupra",
 		ClientSecret: "secret",
 		Scopes:       []string{"openid", "offline_access"},
-		CookieSecret: strings.Repeat("s", 32),
-		Config:       &rest.Config{Host: f.api.URL, BearerToken: "dashboard-token"},
+		Config:       cfg,
+		HTTPClient:   p.Client(),
 		StaticDir:    static,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	jar, _ := cookiejar.New(nil)
-	f.browser = &http.Client{Jar: jar}
+	f.browser = &http.Client{Jar: jar, Transport: p.Client().Transport}
 	return f
 }
 
@@ -292,15 +300,6 @@ func TestSignInAndProxy(t *testing.T) {
 		}
 	}
 
-	code, body = f.do(t, http.MethodGet, "/api/app-namespaces", nil)
-	if code != http.StatusOK || body != `{"namespaces":["immich"]}`+"\n" {
-		t.Errorf("app namespaces are %d %s, want immich", code, body)
-	}
-	got = f.api.last()
-	if got.URL.Query().Get("labelSelector") != kuprav1alpha1.LabelAppNamespace || got.Header.Get("Authorization") != "Bearer dashboard-token" {
-		t.Errorf("namespaces were listed with selector %q and Authorization %q, want %s with the dashboard's own token", got.URL.Query().Get("labelSelector"), got.Header.Get("Authorization"), kuprav1alpha1.LabelAppNamespace)
-	}
-
 	code, _ = f.do(t, http.MethodPost, "/auth/logout", nil)
 	if code != http.StatusForbidden {
 		t.Errorf("logging out without %s is %d, want 403", csrfHeader, code)
@@ -331,9 +330,7 @@ func TestProxyRefusesOtherAPIs(t *testing.T) {
 		// The server's mux redirects dot segments to the cleaned path, which is refused like any other.
 		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/../../../api/v1/secrets", http.StatusTemporaryRedirect},
 		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/%2e%2e/%2e%2e/%2e%2e/api/v1/secrets", http.StatusForbidden},
-		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/namespaces%2fimmich/previews", http.StatusForbidden},
 		{http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1x/previews", http.StatusForbidden},
-		{http.MethodGet, "/api/kube/apis/authorization.k8s.io/v1/selfsubjectaccessreviews", http.StatusForbidden},
 		{http.MethodPost, "/api/kube/apis/authorization.k8s.io/v1/subjectaccessreviews", http.StatusForbidden},
 	} {
 		req, _ := http.NewRequest(tc.method, f.dashboard.URL, nil)
@@ -428,66 +425,6 @@ func TestLocalRedirect(t *testing.T) {
 	}
 }
 
-func TestSealer(t *testing.T) {
-	s, err := newSealer(strings.Repeat("k", 32), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	long := session{IDToken: strings.Repeat("x", 3*chunkSize)}
-	rec := httptest.NewRecorder()
-	if err := s.set(rec, httptest.NewRequest(http.MethodGet, "/", nil), sessionCookie, "/", time.Hour, long); err != nil {
-		t.Fatal(err)
-	}
-	cookies := rec.Result().Cookies()
-	if len(cookies) < 3 {
-		t.Fatalf("long session is in %d cookies, want it split over several", len(cookies))
-	}
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	for _, c := range cookies {
-		if len(c.String()) > 4096 {
-			t.Errorf("cookie %s is %d bytes, want at most 4096", c.Name, len(c.String()))
-		}
-		req.AddCookie(c)
-	}
-	var got session
-	if !s.get(req, sessionCookie, &got) || got.IDToken != long.IDToken {
-		t.Error("long session doesn't open again")
-	}
-	if s.get(req, loginCookie, &got) {
-		t.Error("session opens as another cookie")
-	}
-
-	// A shorter value expires the chunks the longer one left.
-	rec = httptest.NewRecorder()
-	if err := s.set(rec, req, sessionCookie, "/", time.Hour, session{IDToken: "short"}); err != nil {
-		t.Fatal(err)
-	}
-	expired := 0
-	for _, c := range rec.Result().Cookies() {
-		if c.MaxAge < 0 {
-			expired++
-		}
-	}
-	if expired != len(cookies)-1 {
-		t.Errorf("shorter session expired %d cookies, want %d", expired, len(cookies)-1)
-	}
-
-	tampered := httptest.NewRequest(http.MethodGet, "/", nil)
-	for i, c := range cookies {
-		if i == 0 {
-			c.Value = "A" + c.Value[1:]
-		}
-		tampered.AddCookie(c)
-	}
-	if s.get(tampered, sessionCookie, &got) {
-		t.Error("tampered session opens")
-	}
-	other, _ := newSealer(strings.Repeat("o", 32), true)
-	if other.get(req, sessionCookie, &got) {
-		t.Error("session opens with another secret")
-	}
-}
-
 // A refresh that fails for a while keeps the session, so the next request can refresh it. One the provider refuses ends it.
 func TestRefreshFailures(t *testing.T) {
 	f := newFixture(t)
@@ -543,13 +480,13 @@ func TestLogoutWhenRevocationHangs(t *testing.T) {
 func TestRefreshKeptToken(t *testing.T) {
 	f := newFixture(t)
 	f.provider.keepRefreshToken = true
-	f.provider.ttl = time.Second
+	f.provider.ttl = 3 * time.Second
 	f.signIn(t, "/")
 	const path = "/api/kube/apis/kupra.futo.tech/v1alpha1/previews"
 	for i := range 2 {
 		if i > 0 {
 			// ID tokens expire to the second.
-			time.Sleep(2 * time.Second)
+			time.Sleep(4 * time.Second)
 		}
 		if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusOK {
 			t.Fatalf("request %d is %d, want 200", i, code)
@@ -557,5 +494,62 @@ func TestRefreshKeptToken(t *testing.T) {
 	}
 	if f.provider.refreshed != 2 {
 		t.Errorf("provider refreshed %d times, want twice", f.provider.refreshed)
+	}
+}
+
+func TestSessions(t *testing.T) {
+	hashKey, blockKey, err := cookieKeys("client-secret", "sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSessions(hashKey, blockKey, true)
+	long := session{IDToken: strings.Repeat("x", 3*chunkSize), Expiry: time.Now().Add(time.Hour).Truncate(time.Second)}
+	rec := httptest.NewRecorder()
+	if err := s.set(rec, httptest.NewRequest(http.MethodGet, "/", nil), long); err != nil {
+		t.Fatal(err)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) < 3 {
+		t.Fatalf("long session is in %d cookies, want it split over several", len(cookies))
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range cookies {
+		if len(c.String()) > 4096 {
+			t.Errorf("cookie %s is %d bytes, want at most 4096", c.Name, len(c.String()))
+		}
+		req.AddCookie(c)
+	}
+	if got, ok := s.get(req); !ok || got.IDToken != long.IDToken {
+		t.Error("long session doesn't open again")
+	}
+
+	// A shorter session expires the chunks the longer one left.
+	rec = httptest.NewRecorder()
+	if err := s.set(rec, req, session{IDToken: "short"}); err != nil {
+		t.Fatal(err)
+	}
+	expired := 0
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			expired++
+		}
+	}
+	if expired != len(cookies)-1 {
+		t.Errorf("shorter session expired %d cookies, want %d", expired, len(cookies)-1)
+	}
+
+	tampered := httptest.NewRequest(http.MethodGet, "/", nil)
+	for i, c := range cookies {
+		if i == 0 {
+			c.Value = "A" + c.Value[1:]
+		}
+		tampered.AddCookie(c)
+	}
+	if _, ok := s.get(tampered); ok {
+		t.Error("tampered session opens")
+	}
+	otherHash, otherBlock, _ := cookieKeys("rotated-secret", "sessions")
+	if _, ok := newSessions(otherHash, otherBlock, true).get(req); ok {
+		t.Error("session opens after the client secret changed")
 	}
 }

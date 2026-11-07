@@ -40,12 +40,14 @@ CloudNativePG's pods talk to the Kubernetes API server, which the default `restr
 
 The dashboard signs people in with an OIDC provider, and acts as them, so the API server has to trust that provider and accept tokens issued to the dashboard's client, for example with [structured authentication configuration](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#using-authentication-configuration). People need kupra's roles in the apps' namespaces ([ADR 6](adr/0006-access-control.md)).
 
-Register the dashboard with the provider, with `<publicURL>/auth/callback` as its redirect URL. Then create a Secret with the client's secret, and at least 32 random characters to encrypt sessions:
+Register the dashboard with the provider, with `<publicURL>/auth/callback` as its redirect URL. Then create a Secret with the client's secret. The dashboard encrypts its session cookies with keys derived from it, so rotating it signs everyone out:
 
 ```sh
-kubectl -n kupra-system create secret generic kupra-dashboard \
-  --from-literal=client-secret=<secret> --from-literal=cookie-secret="$(openssl rand -base64 32)"
+kubectl -n kupra-system create secret generic kupra-dashboard --from-literal=client-secret=<secret>
 ```
+
+
+The issuer URL and client ID can go in the Secret too, as `issuer-url` and `client-id`, instead of the values below.
 
 ```yaml
 dashboard:

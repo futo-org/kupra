@@ -14,11 +14,10 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
-
-	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
 
 // csrfHeader must be on every request that changes something. A cross-site form can't set it, and a cross-site script can't without the dashboard allowing it through CORS, which it doesn't.
@@ -28,13 +27,11 @@ const csrfHeader = "X-Kupra-CSRF"
 type Options struct {
 	// PublicURL is where people reach the dashboard, such as https://previews.example.com.
 	PublicURL string
-	// IssuerURL, ClientID, ClientSecret and Scopes configure signing in with OIDC.
+	// IssuerURL, ClientID, ClientSecret and Scopes configure signing in with OIDC. The dashboard needs a confidential client: its cookies are encrypted with keys derived from ClientSecret.
 	IssuerURL    string
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
-	// CookieSecret encrypts the session's cookies.
-	CookieSecret string
 	// Config reaches the Kubernetes API server. Its credentials are the dashboard's own, and are only used to find namespaces with apps.
 	Config *rest.Config
 	// StaticDir holds the built page.
@@ -49,15 +46,11 @@ func New(ctx context.Context, opts Options) (http.Handler, error) {
 	if err != nil || public.Host == "" {
 		return nil, errors.New("public URL must be absolute")
 	}
-	s, err := newSealer(opts.CookieSecret, public.Scheme == "https")
+	auth, err := newAuthenticator(ctx, opts, public.Scheme == "https")
 	if err != nil {
 		return nil, err
 	}
-	auth, err := newAuthenticator(ctx, opts, s)
-	if err != nil {
-		return nil, err
-	}
-	own, err := kubernetes.NewForConfig(opts.Config)
+	own, err := dynamic.NewForConfig(opts.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -73,14 +66,14 @@ func New(ctx context.Context, opts Options) (http.Handler, error) {
 	}
 	server.Path = path.Join(server.Path, anonymous.APIPath)
 
-	h := &handler{auth: auth, own: own, anonymous: anonymous}
+	h := &handler{auth: auth, anonymous: anonymous}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /auth/login", auth.login)
 	mux.HandleFunc("GET /auth/callback", auth.callback)
 	mux.HandleFunc("POST /auth/logout", auth.logout)
 	mux.HandleFunc("GET /api/session", h.session)
-	mux.HandleFunc("GET /api/app-namespaces", h.appNamespaces)
+	mux.Handle("GET /api/watch", &watchHandler{auth: auth, anonymous: anonymous, own: own})
 	mux.Handle(kubePrefix+"/", newKubeProxy(auth, server, transport))
 	mux.Handle("/", spa(opts.StaticDir))
 	return securityHeaders(csrf(mux)), nil
@@ -88,7 +81,6 @@ func New(ctx context.Context, opts Options) (http.Handler, error) {
 
 type handler struct {
 	auth      *authenticator
-	own       kubernetes.Interface
 	anonymous *rest.Config
 }
 
@@ -115,24 +107,6 @@ func (h *handler) session(w http.ResponseWriter, r *http.Request) {
 		"username": review.Status.UserInfo.Username,
 		"groups":   review.Status.UserInfo.Groups,
 	})
-}
-
-// appNamespaces lists the namespaces with apps. The page then finds out, as the user, which of their apps it can see.
-func (h *handler) appNamespaces(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.auth.token(w, r); err != nil {
-		authError(w, r, err)
-		return
-	}
-	list, err := h.own.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{LabelSelector: kuprav1alpha1.LabelAppNamespace})
-	if err != nil {
-		httpError(w, r, http.StatusBadGateway, err)
-		return
-	}
-	names := make([]string, 0, len(list.Items))
-	for _, ns := range list.Items {
-		names = append(names, ns.Name)
-	}
-	writeJSON(w, map[string]any{"namespaces": names})
 }
 
 // csrf refuses requests that change something unless they carry csrfHeader.

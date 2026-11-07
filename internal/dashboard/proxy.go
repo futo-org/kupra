@@ -4,68 +4,50 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
+	"regexp"
+
+	kubeproxy "k8s.io/kubectl/pkg/proxy"
 )
 
 // kubePrefix is where the page reaches the Kubernetes API.
 const kubePrefix = "/api/kube"
 
-// allowedKube decides whether the page may make a request to the Kubernetes API: anything on kupra's resources, and access reviews to find out what it may do.
-func allowedKube(method, path string) bool {
-	for _, segment := range strings.Split(path, "/")[1:] {
-		if segment == "" || segment == "." || segment == ".." {
-			return false
-		}
-	}
-	if path == "/apis/kupra.futo.tech/v1alpha1" || strings.HasPrefix(path, "/apis/kupra.futo.tech/v1alpha1/") {
-		return true
-	}
-	return method == http.MethodPost && path == "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
+// kubeFilter decides what the page may ask of the Kubernetes API, the way `kubectl proxy` does: kupra's resources, and access reviews to find out what it may do with them. Paths with dot or empty segments are refused, so they can't step outside these.
+var kubeFilter = &kubeproxy.FilterServer{
+	AcceptPaths: []*regexp.Regexp{
+		regexp.MustCompile(`^/apis/kupra\.futo\.tech/v1alpha1(/|$)`),
+		regexp.MustCompile(`^/apis/authorization\.k8s\.io/v1/selfsubjectaccessreviews$`),
+	},
+	RejectPaths: []*regexp.Regexp{regexp.MustCompile(`(^|/)\.{1,2}(/|$)|//`)},
+	AcceptHosts: []*regexp.Regexp{regexp.MustCompile(`.*`)},
 }
 
-// kubeProxy passes the page's requests to the Kubernetes API server, as the signed-in user.
-type kubeProxy struct {
-	auth  *authenticator
-	proxy *httputil.ReverseProxy
-}
-
-func newKubeProxy(auth *authenticator, server *url.URL, transport http.RoundTripper) *kubeProxy {
-	return &kubeProxy{
-		auth: auth,
-		proxy: &httputil.ReverseProxy{
-			Rewrite: func(pr *httputil.ProxyRequest) {
-				pr.Out.URL.Scheme = server.Scheme
-				pr.Out.URL.Host = server.Host
-				pr.Out.Host = server.Host
-				pr.Out.URL.Path = strings.TrimSuffix(server.Path, "/") + strings.TrimPrefix(pr.In.URL.Path, kubePrefix)
-				pr.Out.URL.RawPath = ""
-			},
-			Transport: transport,
-			// Watches stream, so responses are flushed as they come.
-			FlushInterval: -1,
+// newKubeProxy passes the page's requests to the Kubernetes API server, as the signed-in user.
+func newKubeProxy(auth *authenticator, server *url.URL, transport http.RoundTripper) http.Handler {
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(server)
+			// Only what the API needs is passed on. Cookies hold the user's tokens, and headers like Impersonate-User aren't the page's to send.
+			header := http.Header{}
+			for _, key := range []string{"Accept", "Content-Type", "Authorization"} {
+				if v := pr.Out.Header.Values(key); len(v) > 0 {
+					header[key] = v
+				}
+			}
+			pr.Out.Header = header
 		},
+		Transport: transport,
+		// Watches stream, so responses are flushed as they come.
+		FlushInterval: -1,
 	}
-}
-
-func (p *kubeProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, kubePrefix)
-	if r.URL.RawPath != "" || !allowedKube(r.Method, path) {
-		http.Error(w, "the dashboard doesn't pass on "+r.Method+" "+path, http.StatusForbidden)
-		return
-	}
-	token, err := p.auth.token(w, r)
-	if err != nil {
-		authError(w, r, err)
-		return
-	}
-	out := r.Clone(r.Context())
-	// Only what the API needs is passed on. Cookies hold the user's tokens, and headers like Impersonate-User aren't the page's to send.
-	out.Header = http.Header{}
-	for _, key := range []string{"Accept", "Content-Type"} {
-		if v := r.Header.Values(key); len(v) > 0 {
-			out.Header[key] = v
+	authorized := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.token(w, r)
+		if err != nil {
+			authError(w, r, err)
+			return
 		}
-	}
-	out.Header.Set("Authorization", "Bearer "+token)
-	p.proxy.ServeHTTP(w, out)
+		r.Header.Set("Authorization", "Bearer "+token)
+		proxy.ServeHTTP(w, r)
+	})
+	return http.StripPrefix(kubePrefix, kubeFilter.HandlerFor(authorized))
 }

@@ -54,7 +54,7 @@
             "scopes": {"type": "array", "items": {"type": "string"}}
           }
         },
-        "existingSecret": {"description": "A Secret with client-secret and cookie-secret.", "type": "string"},
+        "existingSecret": {"description": "A Secret with client-secret, and optionally issuer-url and client-id.", "type": "string"},
         "image": {
           "type": "object",
           "additionalProperties": false,
