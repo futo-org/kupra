@@ -11,9 +11,10 @@ import { mdiCameraOutline, mdiPencilOutline, mdiPlus, mdiRestore, mdiTrashCanOut
 import type { Component } from 'svelte';
 import { goto } from '$app/navigation';
 import type { Preview, PreviewApp, PreviewSnapshot } from '#lib/kube/kupra.gen.ts';
+import { createdByAnnotation } from '#lib/kube/preview.ts';
 import PreviewFormModalComponent from './components/PreviewFormModal.svelte';
 import SnapshotModalComponent from './components/SnapshotModal.svelte';
-import { now } from './data.ts';
+import { now, user } from './data.ts';
 import { canCreate, canDeleteSnapshots, findApp, permissions, restoreLabel } from './model.ts';
 import { Route } from './routes.ts';
 import { list, send } from './store.svelte.ts';
@@ -51,7 +52,12 @@ export const getAppActions = (app: PreviewApp) => {
       const name = preview.metadata?.name ?? '';
       send('previews', 'ADDED', {
         ...preview,
-        metadata: { ...preview.metadata, creationTimestamp: now() },
+        // kupra's admission policy records the creator, which the mockup has to do itself.
+        metadata: {
+          ...preview.metadata,
+          creationTimestamp: now(),
+          annotations: { ...preview.metadata?.annotations, [createdByAnnotation]: user.username },
+        },
         status: { phase: 'Pending' },
       });
       toastManager.success(`Created ${name}`);
