@@ -16,6 +16,7 @@ import type { Component } from 'svelte';
 import { goto } from '$app/navigation';
 import PreviewFormModalComponent from './components/PreviewFormModal.svelte';
 import SnapshotModalComponent from './components/SnapshotModal.svelte';
+import { accessRevision } from './kube/preview.ts';
 import type { Preview, PreviewApp, PreviewSnapshot, ResourceAttributes } from './kube/types.ts';
 import { findApp, managedBy, restoreLabel } from './model.ts';
 import {
@@ -43,9 +44,9 @@ const SnapshotModal = SnapshotModalComponent as Component<{
 const confirm = (title: string, prompt: string, confirmText: string) =>
   modalManager.show(ConfirmModal, { title, prompt, confirmText, icon: false });
 
-/** canI asks whether the user may take an action, and is false until the API server answers. */
-const canI = (attributes: () => ResourceAttributes) => {
-  const query = createQuery(() => accessQuery(attributes()));
+/** canI asks whether the user may take an action, and is false until the API server answers. It asks again when revision changes. */
+const canI = (attributes: () => ResourceAttributes, revision: () => string = () => '') => {
+  const query = createQuery(() => accessQuery(attributes(), revision()));
   return () => query.data === true;
 };
 
@@ -86,10 +87,12 @@ export const previewActions = (preview: () => Preview) => {
     resource: 'previews',
     name: preview().metadata?.name,
   });
-  const canPatch = canI(() => target('patch'));
-  const canDelete = canI(() => target('delete'));
+  // Owners can act on a preview once kupra has bound them, which happens after the preview is created or its owners change.
+  const revision = () => accessRevision(preview());
+  const canPatch = canI(() => target('patch'), revision);
+  const canDelete = canI(() => target('delete'), revision);
   // Snapshotting a preview takes kupra's snapshot verb on it, as well as creating snapshots (ADR 6).
-  const canSnapshot = canI(() => target('snapshot'));
+  const canSnapshot = canI(() => target('snapshot'), revision);
   const canCreateSnapshots = canI(() => ({
     namespace: preview().metadata?.namespace,
     verb: 'create',

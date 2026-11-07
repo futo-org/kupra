@@ -159,3 +159,10 @@ export const missingParameters = (parameters: Parameter[], values: Record<string
 /** parameterInput returns which input a parameter gets. An enum limits any type to its values. */
 export const parameterInput = ({ enum: values, type = 'string' }: Parameter) =>
   values?.length ? 'enum' : (type ?? 'string');
+
+/**
+ * accessRevision changes when kupra may have changed who can act on a Preview: kupra binds its owners before it records
+ * the spec's generation as observed, and before it first sets a phase.
+ */
+export const accessRevision = (preview: Preview) =>
+  `${preview.status?.observedGeneration ?? ''}/${preview.status?.phase ?? ''}`;
