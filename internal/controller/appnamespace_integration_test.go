@@ -13,10 +13,10 @@ import (
 	"github.com/futo-org/kupra/internal/controller"
 )
 
-// TestNamespacesWithAppsAreLabelled checks that a namespace is labelled while it contains PreviewApps, and that removing the label leaves its other labels alone.
+// TestNamespacesWithAppsAreLabelled checks that a namespace is labelled while it contains PreviewApps, and that removing the label, whoever set it, leaves its other labels alone.
 func TestNamespacesWithAppsAreLabelled(t *testing.T) {
 	ctx := context.Background()
-	createNamespace(t, "has-apps", map[string]string{"team": "a"})
+	createNamespace(t, "has-apps", map[string]string{"team": "a", controller.LabelHasApps: "true"})
 	labelled := func(want bool) {
 		t.Helper()
 		eventually(t, func() error {

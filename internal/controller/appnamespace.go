@@ -2,9 +2,10 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 
 	corev1 "k8s.io/api/core/v1"
-	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -15,9 +16,6 @@ import (
 
 // LabelHasApps marks the namespaces that contain PreviewApps, so the dashboard can find apps without reading every namespace's.
 const LabelHasApps = "kupra.futo.tech/has-apps"
-
-// appNamespaceFieldManager owns only LabelHasApps, so applying a namespace without it removes the label and nothing else.
-const appNamespaceFieldManager = "kupra-apps"
 
 // AppNamespaceReconciler labels the namespaces that contain PreviewApps.
 type AppNamespaceReconciler struct {
@@ -43,11 +41,16 @@ func (r *AppNamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if _, labelled := ns.Labels[LabelHasApps]; labelled == hasApps {
 		return ctrl.Result{}, nil
 	}
-	apply := corev1ac.Namespace(ns.Name)
+	// A merge patch sets or removes just this label, whoever set it.
+	value := any(nil)
 	if hasApps {
-		apply.WithLabels(map[string]string{LabelHasApps: "true"})
+		value = "true"
 	}
-	return ctrl.Result{}, r.Apply(ctx, apply, client.FieldOwner(appNamespaceFieldManager))
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": map[string]any{LabelHasApps: value}}})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, client.IgnoreNotFound(r.Patch(ctx, &ns, client.RawPatch(types.MergePatchType, patch), client.FieldOwner(FieldManager)))
 }
 
 func (r *AppNamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
