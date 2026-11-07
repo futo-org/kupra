@@ -11,10 +11,10 @@ helm install kupra oci://ghcr.io/futo-org/charts/kupra --version <version> \
 
 ## Upgrade
 
-Helm installs the chart's CRDs, but doesn't upgrade them. Apply them first:
+Helm installs the chart's CRDs, but doesn't upgrade them. Apply them first, taking them over from Helm:
 
 ```sh
-helm show crds oci://ghcr.io/futo-org/charts/kupra --version <version> | kubectl apply --server-side -f -
+helm show crds oci://ghcr.io/futo-org/charts/kupra --version <version> | kubectl apply --server-side --force-conflicts -f -
 helm upgrade kupra oci://ghcr.io/futo-org/charts/kupra --version <version> --namespace kupra-system
 ```
 
