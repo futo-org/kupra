@@ -27,6 +27,9 @@ const (
 	refreshTimeout = 30 * time.Second
 )
 
+// revokeTimeout bounds how long signing out waits for the provider to revoke the refresh token.
+var revokeTimeout = 10 * time.Second
+
 // errSignedOut means a request has no usable session.
 var errSignedOut = errors.New("signed out")
 
@@ -197,7 +200,10 @@ func (a *authenticator) refresh(ctx context.Context, refreshToken string) (*sess
 func (a *authenticator) logout(w http.ResponseWriter, r *http.Request) {
 	var s session
 	if a.sealer.get(r, sessionCookie, &s) && s.RefreshToken != "" && a.revocation != "" {
-		if err := a.revoke(r.Context(), s.RefreshToken); err != nil {
+		// Signing out doesn't wait long for the provider: the session's cookies are cleared either way.
+		ctx, cancel := context.WithTimeout(r.Context(), revokeTimeout)
+		defer cancel()
+		if err := a.revoke(ctx, s.RefreshToken); err != nil {
 			ctrl.LoggerFrom(r.Context()).Info("revoking a refresh token failed", "error", err.Error())
 		}
 	}

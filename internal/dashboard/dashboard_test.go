@@ -33,6 +33,8 @@ type provider struct {
 	mu        sync.Mutex
 	nonces    map[string]string // by code
 	refreshed int
+	// hangRevocation makes revocation never answer.
+	hangRevocation bool
 	// failures are the statuses the next refreshes fail with.
 	failures []int
 	// refreshToken is the one refresh token the provider accepts.
@@ -105,6 +107,12 @@ func newProvider(t *testing.T) *provider {
 		})
 	})
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
+		if p.hangRevocation {
+			// The server only notices the client going away once the body is read.
+			_ = r.ParseForm()
+			<-r.Context().Done()
+			return
+		}
 		_ = r.ParseForm()
 		p.mu.Lock()
 		p.revoked = append(p.revoked, r.Form.Get("token"))
@@ -509,4 +517,20 @@ func invalidGrant(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+}
+
+// Signing out clears the session even when the provider doesn't answer the revocation.
+func TestLogoutWhenRevocationHangs(t *testing.T) {
+	timeout := revokeTimeout
+	revokeTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { revokeTimeout = timeout })
+	f := newFixture(t)
+	f.signIn(t, "/")
+	f.provider.hangRevocation = true
+	if code, _ := f.do(t, http.MethodPost, "/auth/logout", http.Header{csrfHeader: {"1"}}); code != http.StatusNoContent {
+		t.Errorf("logging out is %d, want 204", code)
+	}
+	if code, _ := f.do(t, http.MethodGet, "/api/session", nil); code != http.StatusUnauthorized {
+		t.Errorf("session after logging out is %d, want 401", code)
+	}
 }
