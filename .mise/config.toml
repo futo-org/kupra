@@ -13,6 +13,8 @@ kubectl = "1.37.1"
 helm = "4.3.1"
 "asdf:dex4er/asdf-helm-diff" = { version = "3.15.7", depends = ["helm"] }
 ko = "0.19.1"
+node = "24.22.2"
+pnpm = "12.18.0"
 
 [env]
 HELM_PLUGINS = { value = "{{ tools | get(key='asdf:dex4er/asdf-helm-diff') | get(key='path') }}", tools = true }

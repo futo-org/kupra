@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Generate the dashboard frontend's TypeScript types from the CRDs"
+#MISE depends=["web:install"]
+set -euo pipefail
+
+cd web
+node scripts/generate-types.ts

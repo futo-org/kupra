@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build the dashboard frontend into cmd/dashboard/kodata, which ko ships in the dashboard's image"
+#MISE depends=["web:install"]
+set -euo pipefail
+
+pnpm --dir web run build

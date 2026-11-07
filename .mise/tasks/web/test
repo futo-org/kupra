@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run the dashboard frontend's unit tests"
+#MISE depends=["web:install"]
+set -euo pipefail
+
+pnpm --dir web run test

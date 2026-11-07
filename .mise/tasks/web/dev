@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run the dashboard frontend's dev server, passing /api and /auth to KUPRA_DASHBOARD_URL"
+#MISE depends=["web:install"]
+set -euo pipefail
+
+pnpm --dir web run dev
