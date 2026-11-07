@@ -5,6 +5,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// LabelHasApps marks the namespaces that contain PreviewApps, so the dashboard can find apps without reading every namespace's. kupra's operator sets it.
+const LabelHasApps = "kupra.futo.tech/has-apps"
+
 type PreviewAppSpec struct {
 	// Parameters are a preview's inputs, in the order the dashboard shows them.
 	// +optional
