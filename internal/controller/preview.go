@@ -126,7 +126,6 @@ func (r *PreviewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // reconcile converges a preview on its rendered template: its policy and namespace first, then captures and resets, its app, its state, and the rest of its workload.
 func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Preview) (ctrl.Result, error) {
 	observedGeneration := p.Status.ObservedGeneration
-	p.Status.ObservedGeneration = p.Generation
 	if claimed, err := r.claimResetRequest(ctx, p); err != nil || claimed {
 		// The Preview changed, so start again from a fresh read.
 		return ctrl.Result{RequeueAfter: nextStepInterval}, err
@@ -138,6 +137,8 @@ func (r *PreviewReconciler) reconcile(ctx context.Context, p *kuprav1alpha1.Prev
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// A generation counts as observed once its owners are bound, so clients that ask what they may do once it is, like the dashboard, get the new answer.
+	p.Status.ObservedGeneration = p.Generation
 	_, settings, err := policy.Resolve(ctx, r.Client, p.Namespace)
 	if reason, ok := policyProblem(err); ok {
 		pending(p, reason, err.Error())
