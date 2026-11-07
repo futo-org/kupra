@@ -147,6 +147,15 @@ describe(parameterDefaults.name, () => {
       ]),
     ).toEqual({ a: '' });
   });
+
+  it('starts a required boolean at its first allowed value, or false', () => {
+    expect(
+      parameterDefaults([
+        { name: 'only', title: 'Only', type: 'boolean', required: true, enum: ['true'] },
+        { name: 'free', title: 'Free', type: 'boolean', required: true },
+      ]),
+    ).toEqual({ only: 'true', free: 'false' });
+  });
 });
 
 describe(missingParameters.name, () => {
