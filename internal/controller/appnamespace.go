@@ -35,7 +35,7 @@ func (r *AppNamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 	hasApps := len(apps.Items) > 0
-	if _, labelled := ns.Labels[kuprav1alpha1.LabelAppNamespace]; labelled == hasApps {
+	if value, labelled := ns.Labels[kuprav1alpha1.LabelAppNamespace]; labelled == hasApps && value == "" {
 		return ctrl.Result{}, nil
 	}
 	// A merge patch sets or removes just this label, whoever set it.
