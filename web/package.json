@@ -15,10 +15,13 @@
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "mockup:screenshots": "node scripts/mockup-screenshots.ts"
   },
   "dependencies": {
-    "@immich/ui": "^0.92.0"
+    "@immich/ui": "^0.92.0",
+    "@mdi/js": "^7.4.47",
+    "luxon": "^3.7.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -27,6 +30,7 @@
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.4",
+    "@types/luxon": "^3.7.6",
     "@types/node": "^24.19.2",
     "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
@@ -34,6 +38,7 @@
     "eslint-plugin-svelte": "^3.24.0",
     "eslint-plugin-unicorn": "^79.0.0",
     "globals": "^17.14.0",
+    "playwright": "^1.65.0",
     "prettier": "^3.9.10",
     "prettier-plugin-svelte": "^4.1.1",
     "svelte": "^5.57.3",
