@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  accessRevision,
   createdByAnnotation,
   integerError,
   missingParameters,
@@ -204,5 +205,37 @@ describe(integerError.name, () => {
 
   it('leaves empty values to the default', () => {
     expect(integerError('')).toBeUndefined();
+  });
+});
+
+describe(accessRevision.name, () => {
+  const base: Preview = {
+    apiVersion: 'kupra.futo.tech/v1alpha1',
+    kind: 'Preview',
+    metadata: { name: 'pr-1', namespace: 'ns', resourceVersion: '1' },
+    spec: { appRef: { name: 'app' } },
+  };
+  const withStatus = (status: Preview['status'], resourceVersion = '1'): Preview => ({
+    ...base,
+    metadata: { ...base.metadata, resourceVersion },
+    status,
+  });
+
+  it('changes once kupra first reconciles a preview', () => {
+    expect(accessRevision(withStatus({ observedGeneration: 1, phase: 'Pending' }))).not.toBe(accessRevision(base));
+  });
+
+  it('changes when kupra observes a new generation, or the phase changes', () => {
+    const running = accessRevision(withStatus({ observedGeneration: 1, phase: 'Running' }));
+    expect(accessRevision(withStatus({ observedGeneration: 2, phase: 'Running' }))).not.toBe(running);
+    expect(accessRevision(withStatus({ observedGeneration: 1, phase: 'Stopping' }))).not.toBe(running);
+  });
+
+  it('stays the same while other parts of the status change', () => {
+    expect(
+      accessRevision(
+        withStatus({ observedGeneration: 1, phase: 'Running', links: [{ name: 'Web', url: 'https://a' }] }, '2'),
+      ),
+    ).toBe(accessRevision(withStatus({ observedGeneration: 1, phase: 'Running' })));
   });
 });
