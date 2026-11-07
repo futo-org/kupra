@@ -984,16 +984,9 @@ func listMetadataKeys(obj *unstructured.Unstructured) map[string]map[string]bool
 // appliedListMetadataKeys returns the finalizers and owner references kupra's field manager owns on a live object.
 func appliedListMetadataKeys(live *unstructured.Unstructured) map[string]map[string]bool {
 	keys := map[string]map[string]bool{}
-	for _, e := range live.GetManagedFields() {
-		if e.Manager != FieldManager || e.Operation != metav1.ManagedFieldsOperationApply || e.Subresource != "" || e.FieldsV1 == nil {
-			continue
-		}
-		var fields map[string]map[string]map[string]any
-		if json.Unmarshal(e.FieldsV1.GetRawBytes(), &fields) != nil {
-			continue
-		}
+	for _, metadata := range appliedMetadata(live, FieldManager) {
 		for _, field := range []string{"f:finalizers", "f:ownerReferences"} {
-			for key := range fields["f:metadata"][field] {
+			for key := range metadata[field] {
 				if key == "." {
 					continue
 				}

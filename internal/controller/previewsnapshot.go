@@ -9,7 +9,6 @@ import (
 
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/conditions"
-	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -126,27 +125,8 @@ func (r *PreviewSnapshotReconciler) reconcileDelete(ctx context.Context, s *kupr
 			}
 		}
 	}
-	var snapshots snapshotv1.VolumeSnapshotList
-	if err := r.APIReader.List(ctx, &snapshots, selector); err != nil && !apimeta.IsNoMatchError(err) {
+	if _, err := deleteSnapshots(ctx, r.APIReader, r.Client, selector); err != nil {
 		return ctrl.Result{}, err
-	}
-	for i := range snapshots.Items {
-		if err := client.IgnoreNotFound(r.Delete(ctx, &snapshots.Items[i])); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-	var contents snapshotv1.VolumeSnapshotContentList
-	if err := r.APIReader.List(ctx, &contents, selector); err != nil && !apimeta.IsNoMatchError(err) {
-		return ctrl.Result{}, err
-	}
-	for i := range contents.Items {
-		// Bound contents go with their VolumeSnapshot.
-		if contents.Items[i].Spec.DeletionPolicy == snapshotv1.VolumeSnapshotContentDelete {
-			continue
-		}
-		if err := client.IgnoreNotFound(r.Delete(ctx, &contents.Items[i])); err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	patch := client.MergeFromWithOptions(s.DeepCopy(), client.MergeFromWithOptimisticLock{})
