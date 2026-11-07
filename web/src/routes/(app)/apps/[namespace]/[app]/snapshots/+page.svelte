@@ -6,7 +6,7 @@
   import Time from '#lib/components/Time.svelte';
   import Watched from '#lib/components/Watched.svelte';
   import { findCondition } from '#lib/kube/conditions.ts';
-  import { collectionsIn, findApp, findPreview, heldBy, snapshotsOf } from '#lib/model.ts';
+  import { collectionsIn, findApp, findPreview, heldBy, isDeleted, snapshotsOf } from '#lib/model.ts';
   import { Route } from '#lib/routes.ts';
   import type { PageProps } from './$types';
 
@@ -52,7 +52,9 @@
                       {sourceName}
                     </Link>
                   {:else}
-                    <Text size="small" color="muted">{sourceName} (deleted)</Text>
+                    <Text size="small" color="muted"
+                      >{sourceName}{isDeleted(params.namespace, sourceName) ? ' (deleted)' : ''}</Text
+                    >
                   {/if}
                 </TableCell>
                 <TableCell class={columns.phase}>

@@ -13,6 +13,8 @@ const backend: ProxyOptions = {
 };
 
 export default defineConfig({
+  // Tests run Svelte's client code, whose effects run, rather than its server code.
+  resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined,
   server: {
     proxy: { '/api': backend, '/auth': backend },
   },

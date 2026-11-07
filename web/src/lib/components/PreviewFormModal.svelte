@@ -1,16 +1,13 @@
 <script lang="ts">
+  import { Field, FormModal, HelperText, Input, Select, Stack, Switch, type SelectOption } from '@immich/ui';
+  import { dnsLabelError } from '#lib/kube/names.ts';
   import {
-    Field,
-    FormModal,
-    HelperText,
-    Input,
-    NumberInput,
-    Select,
-    Stack,
-    Switch,
-    type SelectOption,
-  } from '@immich/ui';
-  import { withParameter } from '#lib/kube/preview.ts';
+    integerError,
+    missingParameters,
+    parameterDefaults,
+    parameterInput,
+    withParameter,
+  } from '#lib/kube/preview.ts';
   import { apiVersion, type Preview, type PreviewApp } from '#lib/kube/types.ts';
   import { findPreview, restoreLabel, snapshotsOf } from '#lib/model.ts';
 
@@ -55,8 +52,9 @@
     if (preview || name === '') {
       return;
     }
-    if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name) || name.length > 63) {
-      return "must consist of lower case alphanumeric characters or '-', and start and end with one";
+    const invalid = dnsLabelError(name);
+    if (invalid) {
+      return invalid;
     }
     if (findPreview(namespace, name)) {
       return 'already exists';
@@ -67,7 +65,7 @@
   const initial = () => ({
     name: preview?.metadata?.name ?? '',
     values: {
-      ...Object.fromEntries(parameters.flatMap(({ name, default: value }) => (value ? [[name, value]] : []))),
+      ...parameterDefaults(parameters),
       ...preview?.spec.parameters,
     } as Record<string, string>,
     restore: preview ? restoreValue(preview) : 'empty',
@@ -77,9 +75,12 @@
   let values = $state(start.values);
   let restore = $state(start.restore);
 
-  const valueOf = (name: string) => values[name] ?? '';
+  const valueOf = (name: string) => (Object.hasOwn(values, name) ? values[name] : undefined) ?? '';
 
-  const missing = $derived(parameters.some((parameter) => parameter.required && valueOf(parameter.name) === ''));
+  const missing = $derived(missingParameters(parameters, values).length > 0);
+  const invalid = $derived(
+    parameters.some((parameter) => parameter.type === 'integer' && integerError(valueOf(parameter.name)) !== undefined),
+  );
 
   const onSubmit = () => {
     const restoreFrom = restore.startsWith('name:')
@@ -97,7 +98,7 @@
   icon={false}
   size="medium"
   submitText={preview ? 'Save' : 'Create'}
-  disabled={name === '' || nameError !== undefined || missing}
+  disabled={name === '' || nameError !== undefined || missing || invalid}
   onClose={() => onClose()}
   {onSubmit}
 >
@@ -111,30 +112,31 @@
 
     {#each parameters as parameter (parameter.name)}
       {@const required = parameter.required ? 'indicator' : false}
-      {#if parameter.type === 'boolean'}
-        <Field label={parameter.title} description={parameter.description}>
-          <Switch
-            checked={values[parameter.name] === 'true'}
-            onCheckedChange={(checked) => (values[parameter.name] = String(checked))}
-          />
-        </Field>
-      {:else if parameter.type === 'integer'}
-        <Field label={parameter.title} description={parameter.description} {required}>
-          <NumberInput
-            bind:value={
-              () => (valueOf(parameter.name) === '' ? undefined : Number(valueOf(parameter.name))),
-              (value) => (values = withParameter(values, parameter, value === undefined ? '' : String(value)))
-            }
-          />
-        </Field>
-      {:else if parameter.enum}
+      {@const input = parameterInput(parameter)}
+      {#if input === 'enum'}
         <Field label={parameter.title} description={parameter.description} {required}>
           <Select
-            options={parameter.enum}
-            bind:value={
-              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter, value))
-            }
+            options={parameter.enum ?? []}
+            bind:value={() => valueOf(parameter.name), (value) => (values = withParameter(values, parameter, value))}
           />
+        </Field>
+      {:else if input === 'boolean'}
+        <Field label={parameter.title} description={parameter.description} {required}>
+          <Switch
+            checked={valueOf(parameter.name) === 'true'}
+            onCheckedChange={(checked) => (values = withParameter(values, parameter, String(checked)))}
+          />
+        </Field>
+      {:else if input === 'integer'}
+        <Field label={parameter.title} description={parameter.description} {required}>
+          <!-- A text input keeps the value as typed: a JavaScript number can't hold every 64-bit integer. -->
+          <Input
+            inputmode="numeric"
+            bind:value={() => valueOf(parameter.name), (value) => (values = withParameter(values, parameter, value))}
+          />
+          {#if integerError(valueOf(parameter.name))}
+            <HelperText color="danger">{integerError(valueOf(parameter.name))}</HelperText>
+          {/if}
         </Field>
       {:else}
         {@const repository = parameter.uiHint?.imageTag?.repository}
@@ -145,9 +147,7 @@
           {required}
         >
           <Input
-            bind:value={
-              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter, value))
-            }
+            bind:value={() => valueOf(parameter.name), (value) => (values = withParameter(values, parameter, value))}
           />
         </Field>
       {/if}

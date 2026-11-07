@@ -117,3 +117,18 @@ export const isFailing = (preview: Preview) =>
 /** collectionsIn returns the collections of kupra's resources in a namespace, which an app's pages show. */
 export const collectionsIn = (namespace: string) =>
   ['previewapps', 'previews', 'previewsnapshots'].map((resource) => `${resource}/${namespace}`);
+
+/** previewOf returns an app's preview with this name, or undefined if the name belongs to another app's preview. */
+export const previewOf = (namespace: string, app: string, name: string) => {
+  const preview = findPreview(namespace, name);
+  return preview?.spec.appRef.name === app ? preview : undefined;
+};
+
+/** resetSource says what a reset restores a preview's state from, if its spec says. */
+export const resetSource = (preview: Preview) => (preview.spec.restoreFrom ? restoreLabel(preview) : undefined);
+
+/** isDeleted reports whether a preview is known to be gone: its namespace's previews were listed and it isn't among them. */
+export const isDeleted = (namespace: string, name: string) => {
+  const previews = store.collection(`previews/${namespace}`);
+  return previews?.synced === true && !previews.error && findPreview(namespace, name) === undefined;
+};

@@ -30,13 +30,13 @@
   import Watched from '#lib/components/Watched.svelte';
   import { conditionColor, findCondition } from '#lib/kube/conditions.ts';
   import { createdByAnnotation, ownerLabel, owners, parameterRows } from '#lib/kube/preview.ts';
-  import { collectionsIn, findApp, findPreview, isFailing, managedBy, restoreLabel, source } from '#lib/model.ts';
+  import { collectionsIn, findApp, isFailing, managedBy, previewOf, resetSource, source } from '#lib/model.ts';
   import { Route } from '#lib/routes.ts';
   import type { PageProps } from './$types';
 
   const { params }: PageProps = $props();
 
-  const preview = $derived(findPreview(params.namespace, params.preview));
+  const preview = $derived(previewOf(params.namespace, params.app, params.preview));
   const app = $derived(findApp(params.namespace, params.app));
   const breadcrumbs = $derived([
     { title: params.namespace },
@@ -125,8 +125,8 @@
                 {:else}
                   Empty
                 {/if}
-                {#if preview.spec.restoreFrom?.snapshotSelector}
-                  <Text size="tiny" color="muted">{restoreLabel(preview)} on reset</Text>
+                {#if resetSource(preview)}
+                  <Text size="tiny" color="muted">{resetSource(preview)} on reset</Text>
                 {/if}
               </dd>
               <dt class="font-medium">Owners</dt>
