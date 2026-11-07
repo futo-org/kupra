@@ -16,16 +16,30 @@
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "test": "vitest run",
-    "mockup:screenshots": "node scripts/mockup-screenshots.ts"
+    "mockup:screenshots": "node scripts/mockup/screenshots.ts"
+  },
+  "crd-generate": {
+    "input": [
+      "../charts/kupra/crds/kupra.futo.tech_previewapps.yaml",
+      "../charts/kupra/crds/kupra.futo.tech_previewpolicies.yaml",
+      "../charts/kupra/crds/kupra.futo.tech_previews.yaml",
+      "../charts/kupra/crds/kupra.futo.tech_previewsnapshots.yaml"
+    ],
+    "output": "node_modules/.cache/crd-generate"
   },
   "dependencies": {
     "@immich/ui": "^0.92.0",
     "@mdi/js": "^7.4.47",
+    "@tanstack/svelte-query": "^6.3.11",
     "luxon": "^3.7.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+    "@kubernetes-models/apimachinery": "^3.0.2",
+    "@kubernetes-models/base": "^6.0.1",
+    "@kubernetes-models/crd-generate": "^6.1.1",
+    "@kubernetes-models/validate": "^5.0.2",
     "@sveltejs/adapter-static": "^4.0.1",
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
@@ -38,6 +52,7 @@
     "eslint-plugin-svelte": "^3.24.0",
     "eslint-plugin-unicorn": "^79.0.0",
     "globals": "^17.14.0",
+    "kubernetes-models": "^5.1.0",
     "playwright": "^1.65.0",
     "prettier": "^3.9.10",
     "prettier-plugin-svelte": "^4.1.1",
@@ -48,7 +63,6 @@
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6",
-    "vitest": "^5.1.0",
-    "yaml": "^2.9.1"
+    "vitest": "^5.1.0"
   }
 }

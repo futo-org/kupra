@@ -8,7 +8,7 @@ import svelteParser from 'svelte-eslint-parser';
 import typescriptEslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['build', '.svelte-kit', 'node_modules'] },
+  { ignores: ['build', '.svelte-kit', 'node_modules', 'src/lib/kube/gen'] },
   js.configs.recommended,
   typescriptEslint.configs.recommendedTypeChecked,
   eslintPluginUnicorn.configs.recommended,

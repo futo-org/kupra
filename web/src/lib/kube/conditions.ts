@@ -1,4 +1,4 @@
-import type { Condition } from './meta.ts';
+import type { Condition } from './types.ts';
 
 /** Color is the color the dashboard shows a status in. */
 export type Color = 'success' | 'danger' | 'warning' | 'info' | 'secondary';

@@ -1,94 +1,103 @@
 <script lang="ts">
-  import {
-    Alert,
-    Breadcrumbs,
-    Heading,
-    Table,
-    TableBody,
-    TableCell,
-    TableHeader,
-    TableHeading,
-    TableRow,
-    Text,
-  } from '@immich/ui';
-  import { resolve } from '$app/paths';
-  import { clock } from '#lib/clock.svelte.ts';
-  import Links from '#lib/components/Links.svelte';
-  import LoadState from '#lib/components/LoadState.svelte';
+  import { Link, Stack, Table, TableBody, TableCell, TableHeader, TableHeading, TableRow, Text } from '@immich/ui';
+  import AppPage from '#lib/components/AppPage.svelte';
+  import LinkButtons from '#lib/components/LinkButtons.svelte';
   import PhaseBadge from '#lib/components/PhaseBadge.svelte';
-  import ReadyBadge from '#lib/components/ReadyBadge.svelte';
-  import { age } from '#lib/format.ts';
-  import { nameSelector } from '#lib/kube/paths.ts';
-  import { ownerLabel, owners, previewsOf } from '#lib/kube/preview.ts';
-  import { watchList } from '#lib/kube/watch.svelte.ts';
+  import PreviewMenu from '#lib/components/PreviewMenu.svelte';
+  import Time from '#lib/components/Time.svelte';
+  import Watched from '#lib/components/Watched.svelte';
+  import { findCondition } from '#lib/kube/conditions.ts';
+  import { ownerLabel, owners } from '#lib/kube/preview.ts';
+  import { collectionsIn, findApp, isFailing, previewsOf, source } from '#lib/model.ts';
+  import { Route } from '#lib/routes.ts';
   import type { PageProps } from './$types';
 
   const { params }: PageProps = $props();
 
-  const apps = watchList(() => ({
-    kind: 'PreviewApp',
-    namespace: params.namespace,
-    fieldSelector: nameSelector(params.app),
-  }));
-  const previews = watchList(() => ({ kind: 'Preview', namespace: params.namespace }));
-  const app = $derived(apps.current.items[0]);
-  const appPreviews = $derived(previewsOf(previews.current.items, params.app));
+  const app = $derived(findApp(params.namespace, params.app));
+  const previews = $derived(previewsOf(params.namespace, params.app));
+
+  const columns = {
+    name: 'flex-[10] break-words',
+    status: 'flex-[11] break-words',
+    links: 'hidden flex-[12] flex-wrap justify-center gap-1 md:flex',
+    source: 'hidden flex-[10] break-words lg:block',
+    restored: 'hidden flex-[9] break-words xl:block',
+    owners: 'hidden flex-[10] break-words lg:block',
+    age: 'hidden flex-[7] break-words md:block',
+    menu: 'flex w-12 flex-none justify-end',
+  };
 </script>
 
-<Breadcrumbs
-  class="mb-2"
-  items={[{ title: 'Apps', href: resolve('/(app)') }, { title: params.namespace }, { title: params.app }]}
-/>
-
-<div class="mb-4 flex items-center gap-3">
-  <Heading size="large">{params.app}</Heading>
+<Watched collections={collectionsIn(params.namespace)}>
   {#if app}
-    <ReadyBadge object={app} />
-  {/if}
-</div>
-
-<LoadState loaded={apps.current.loaded} error={apps.current.error} what={`apps in ${params.namespace}`}>
-  {#if !app}
-    <Alert color="warning" title={`PreviewApp ${params.app} not found`} />
-  {:else}
-    <Heading tag="h2" size="small" class="mb-2">Previews</Heading>
-    <LoadState loaded={previews.current.loaded} error={previews.current.error} what={`previews in ${params.namespace}`}>
-      {#if appPreviews.length === 0}
-        <Text color="muted">No previews</Text>
+    <AppPage {app} tab="previews">
+      {#if previews.length === 0}
+        <Text color="muted" class="py-8 text-center">No previews</Text>
       {:else}
-        <Table>
+        <Table striped spacing="small" size="small">
           <TableHeader>
-            <TableHeading>Name</TableHeading>
-            <TableHeading>Phase</TableHeading>
-            <TableHeading>Ready</TableHeading>
-            <TableHeading>Links</TableHeading>
-            <TableHeading>Owners</TableHeading>
-            <TableHeading>Restored from</TableHeading>
-            <TableHeading>Age</TableHeading>
+            <TableHeading class="{columns.name} px-1">Name</TableHeading>
+            <TableHeading class="{columns.status} px-1">Status</TableHeading>
+            <TableHeading class="{columns.links} px-1">Links</TableHeading>
+            <TableHeading class="{columns.source} px-1">Source</TableHeading>
+            <TableHeading class="{columns.restored} px-1">Started from</TableHeading>
+            <TableHeading class="{columns.owners} px-1">Owners</TableHeading>
+            <TableHeading class="{columns.age} px-1">Age</TableHeading>
+            <TableHeading class="{columns.menu} px-1"></TableHeading>
           </TableHeader>
           <TableBody>
-            {#each appPreviews as preview (preview.metadata?.uid)}
+            {#each previews as preview (preview.metadata?.name)}
               {@const name = preview.metadata?.name ?? ''}
+              {@const ready = findCondition(preview, 'Ready')}
+              {@const from = source(preview)}
               <TableRow>
-                <TableCell>
-                  <a
-                    class="underline"
-                    href={resolve('/(app)/apps/[namespace]/[app]/[preview]', { ...params, preview: name })}
-                  >
-                    {name}
-                  </a>
+                <TableCell class={columns.name}>
+                  <Link href={Route.preview(params.namespace, params.app, name)}>{name}</Link>
                 </TableCell>
-                <TableCell><PhaseBadge phase={preview.status?.phase} /></TableCell>
-                <TableCell><ReadyBadge object={preview} /></TableCell>
-                <TableCell><Links links={preview.status?.links} /></TableCell>
-                <TableCell>{owners(preview).map(ownerLabel).join(', ')}</TableCell>
-                <TableCell>{preview.status?.restoredFrom?.name ?? ''}</TableCell>
-                <TableCell>{age(preview.metadata?.creationTimestamp, clock.now)}</TableCell>
+                <TableCell class={columns.status}>
+                  <Stack gap={1} class="items-center">
+                    <PhaseBadge phase={preview.status?.phase} />
+                    {#if ready && ready.status !== 'True'}
+                      <Text size="tiny" color={isFailing(preview) ? 'danger' : 'muted'} class="line-clamp-2">
+                        {ready.message}
+                      </Text>
+                    {/if}
+                  </Stack>
+                </TableCell>
+                <TableCell class={columns.links}>
+                  <LinkButtons links={preview.status?.links} size="tiny" />
+                </TableCell>
+                <TableCell class={columns.source}>
+                  {#if from}
+                    <Link href={from.url} target="_blank" rel="noreferrer">{from.title}</Link>
+                  {:else}
+                    <Text size="small" color="muted">Unknown</Text>
+                  {/if}
+                </TableCell>
+                <TableCell class={columns.restored}>
+                  {#if preview.status?.restoredFrom}
+                    <Text size="small">{preview.status.restoredFrom.name}</Text>
+                  {:else}
+                    <Text size="small" color="muted">Empty</Text>
+                  {/if}
+                </TableCell>
+                <TableCell class={columns.owners}>
+                  <Text size="small">{owners(preview).map(ownerLabel).join(', ')}</Text>
+                </TableCell>
+                <TableCell class={columns.age}>
+                  <Text size="small"><Time timestamp={preview.metadata?.creationTimestamp} /></Text>
+                </TableCell>
+                <TableCell class={columns.menu}>
+                  <PreviewMenu {preview} />
+                </TableCell>
               </TableRow>
             {/each}
           </TableBody>
         </Table>
       {/if}
-    </LoadState>
+    </AppPage>
+  {:else}
+    <Text color="muted" class="p-4">App {params.app} not found</Text>
   {/if}
-</LoadState>
+</Watched>

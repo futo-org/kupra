@@ -1,8 +1,11 @@
 import type { Color } from './conditions.ts';
-import type { Preview, PreviewApp } from './kupra.gen.ts';
+import type { Preview, PreviewApp } from './types.ts';
 
 /** createdByAnnotation records who created a Preview. */
 export const createdByAnnotation = 'kupra.futo.tech/created-by';
+
+/** sourceAnnotation records where a Preview came from, such as a pull request's URL. Whatever creates the Preview sets it. */
+export const sourceAnnotation = 'kupra.futo.tech/source';
 
 /** Phase is a Preview's phase. */
 export type Phase = NonNullable<NonNullable<Preview['status']>['phase']>;
@@ -52,10 +55,6 @@ export const owners = (preview: Preview): Owner[] => {
   }
   return result;
 };
-
-/** previewsOf returns the Previews of the PreviewApp with this name. */
-export const previewsOf = (previews: Preview[], app: string) =>
-  previews.filter((preview) => preview.spec.appRef.name === app);
 
 /** ParameterRow is one of a Preview's parameters, as the dashboard shows it. */
 export type ParameterRow = {

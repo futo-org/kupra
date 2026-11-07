@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { Preview, PreviewApp } from './kupra.gen.ts';
-import { createdByAnnotation, ownerLabel, owners, parameterRows, phaseColor, previewsOf } from './preview.ts';
+import { createdByAnnotation, ownerLabel, owners, parameterRows, phaseColor } from './preview.ts';
+import type { Preview, PreviewApp } from './types.ts';
 
 const preview = (spec: Partial<Preview['spec']> = {}, annotations?: Record<string, string>): Preview => ({
+  apiVersion: 'kupra.futo.tech/v1alpha1',
+  kind: 'Preview',
   metadata: { name: 'pr-1', namespace: 'ns', annotations },
   spec: { appRef: { name: 'app' }, ...spec },
 });
 
 const app = (parameters: NonNullable<PreviewApp['spec']['parameters']>): PreviewApp => ({
+  apiVersion: 'kupra.futo.tech/v1alpha1',
+  kind: 'PreviewApp',
   metadata: { name: 'app', namespace: 'ns' },
   spec: { parameters, template: { resources: [] } },
 });
@@ -34,14 +38,6 @@ describe(owners.name, () => {
 
   it('is empty without a creator or owners', () => {
     expect(owners(preview())).toEqual([]);
-  });
-});
-
-describe(previewsOf.name, () => {
-  it("keeps the app's previews", () => {
-    const other = preview({ appRef: { name: 'other' } });
-    const mine = preview();
-    expect(previewsOf([other, mine], 'app')).toEqual([mine]);
   });
 });
 

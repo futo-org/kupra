@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { conditionColor, findCondition, readyColor, readyLabel } from './conditions.ts';
-import type { Condition } from './meta.ts';
+import type { Condition } from './types.ts';
 
 const condition = (type: string, status: Condition['status'], reason = ''): Condition => ({
   type,

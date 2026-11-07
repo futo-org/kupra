@@ -1,71 +1,71 @@
 <script lang="ts">
-  import { Alert, Card, CardHeader, CardTitle, Heading, LoadingSpinner, Text } from '@immich/ui';
-  import { resolve } from '$app/paths';
-  import { getAppNamespaces } from '#lib/api/index.ts';
-  import ReadyBadge from '#lib/components/ReadyBadge.svelte';
-  import { groupApps } from '#lib/kube/apps.ts';
-  import { pollValue } from '#lib/kube/poll.ts';
-  import { pollLists } from '#lib/kube/watch.svelte.ts';
+  import { Card, CardBody, CardHeader, CardTitle, Link, Stack, Text } from '@immich/ui';
+  import { mdiHomeOutline } from '@mdi/js';
+  import { createQuery } from '@tanstack/svelte-query';
+  import LinkButtons from '#lib/components/LinkButtons.svelte';
+  import PageLayout from '#lib/components/PageLayout.svelte';
+  import PhaseBadge from '#lib/components/PhaseBadge.svelte';
+  import Time from '#lib/components/Time.svelte';
+  import Watched from '#lib/components/Watched.svelte';
+  import { findCondition } from '#lib/kube/conditions.ts';
+  import { isFailing, myPreviews, namespaces, source } from '#lib/model.ts';
+  import { sessionQuery } from '#lib/queries.ts';
+  import { Route } from '#lib/routes.ts';
 
-  let namespaces = $state<string[]>([]);
-  let namespacesError = $state<Error>();
-  let namespacesLoaded = $state(false);
-
-  // Namespaces are looked for again as often as their apps are listed, so new ones show up. They're only replaced when
-  // they change, as that lists their apps again.
-  $effect(() =>
-    pollValue(getAppNamespaces, (state) => {
-      namespacesError = state.error;
-      namespacesLoaded = state.loaded;
-      if (state.value && state.value.join('\n') !== namespaces.join('\n')) {
-        namespaces = state.value;
-      }
-    }),
-  );
-
-  const apps = pollLists('PreviewApp', () => namespaces);
-  const grouped = $derived(groupApps(apps.current));
+  const session = createQuery(() => sessionQuery);
+  const previews = $derived(session.data ? myPreviews(session.data) : []);
+  const collections = $derived(['app-namespaces', ...namespaces().map((namespace) => `previews/${namespace}`)]);
 </script>
 
-<Heading size="large" class="mb-4">Apps</Heading>
-
-{#if namespacesError}
-  <Alert color={namespacesLoaded ? 'warning' : 'danger'} title="Can't look for apps, retrying">
-    {namespacesError.message}
-  </Alert>
-{/if}
-{#if !namespacesLoaded}
-  {#if !namespacesError}
-    <LoadingSpinner />
-  {/if}
-{:else if !grouped.loaded}
-  <LoadingSpinner />
-{:else if grouped.groups.length === 0}
-  <Text color="muted">No apps</Text>
-{:else}
-  <div class="flex flex-col gap-6">
-    {#each grouped.groups as group (group.namespace)}
-      <section>
-        <Heading tag="h2" size="small" class="mb-2">{group.namespace}</Heading>
-        {#if group.error}
-          <Alert color="warning" title="Can't refresh, retrying">{group.error.message}</Alert>
-        {/if}
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {#each group.apps as app (app.metadata?.name)}
-            {@const name = app.metadata?.name ?? ''}
-            <a href={resolve('/(app)/apps/[namespace]/[app]', { namespace: group.namespace, app: name })}>
-              <Card>
-                <CardHeader>
-                  <div class="flex items-center justify-between gap-2">
-                    <CardTitle>{name}</CardTitle>
-                    <ReadyBadge object={app} />
+<PageLayout breadcrumbs={[{ title: 'My previews', icon: mdiHomeOutline }]}>
+  <Watched {collections}>
+    {#if previews.length === 0}
+      <Stack gap={1} class="py-16 text-center">
+        <Text fontWeight="medium">No previews yet</Text>
+        <Text size="small" color="muted">Previews you create or own show up here. Pick an app to create one.</Text>
+      </Stack>
+    {:else}
+      <div class="grid items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+        {#each previews as preview (`${preview.metadata?.namespace}/${preview.metadata?.name}`)}
+          {@const namespace = preview.metadata?.namespace ?? ''}
+          {@const app = preview.spec.appRef.name}
+          {@const ready = findCondition(preview, 'Ready')}
+          {@const from = source(preview)}
+          <Card>
+            <CardHeader>
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <Link href={Route.preview(namespace, app, preview.metadata?.name ?? '')} underline={false}>
+                    <CardTitle class="truncate">{preview.metadata?.name}</CardTitle>
+                  </Link>
+                  <Text size="small" color="muted">
+                    {app}
+                    {#if from}
+                      · <Link href={from.url} target="_blank" rel="noreferrer">{from.title}</Link>
+                    {/if}
+                    · <Time timestamp={preview.metadata?.creationTimestamp} />
+                  </Text>
+                </div>
+                <PhaseBadge phase={preview.status?.phase} />
+              </div>
+            </CardHeader>
+            <CardBody>
+              <Stack gap={3}>
+                {#if ready && ready.status !== 'True'}
+                  <Text size="small" color={isFailing(preview) ? 'danger' : 'muted'} class="line-clamp-2">
+                    {ready.message}
+                  </Text>
+                {/if}
+                {#if preview.status?.links?.length}
+                  <div class="flex flex-wrap gap-2">
+                    <LinkButtons links={preview.status.links} />
                   </div>
-                </CardHeader>
-              </Card>
-            </a>
-          {/each}
-        </div>
-      </section>
-    {/each}
-  </div>
-{/if}
+                {/if}
+              </Stack>
+            </CardBody>
+          </Card>
+        {/each}
+      </div>
+    {/if}
+  </Watched>
+</PageLayout>
