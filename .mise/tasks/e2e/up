@@ -81,6 +81,12 @@ kubeadmConfigPatchesJSON6902:
 YAML
 fi
 kind export kubeconfig --name "$cluster"
+# A cluster created before Dex was added lacks its mounts, port mappings and authentication config.
+if ! k -n kube-system get pods -l component=kube-apiserver -o jsonpath='{.items[*].spec.containers[*].command}' |
+  grep -q -- --authentication-config=; then
+  echo "cluster $cluster has no authentication config: delete it with mise run e2e:down first" >&2
+  exit 1
+fi
 
 # The images, the test binary and the browser build while the cluster is set up. The images only need the cluster to be loaded into.
 arch="$(go env GOARCH)"
