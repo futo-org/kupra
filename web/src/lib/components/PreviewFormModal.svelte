@@ -1,17 +1,13 @@
 <script lang="ts">
-  import {
-    Field,
-    FormModal,
-    HelperText,
-    Input,
-    NumberInput,
-    Select,
-    Stack,
-    Switch,
-    type SelectOption,
-  } from '@immich/ui';
+  import { Field, FormModal, HelperText, Input, Select, Stack, Switch, type SelectOption } from '@immich/ui';
   import { dnsLabelError } from '#lib/kube/names.ts';
-  import { missingParameters, parameterDefaults, parameterInput, withParameter } from '#lib/kube/preview.ts';
+  import {
+    integerError,
+    missingParameters,
+    parameterDefaults,
+    parameterInput,
+    withParameter,
+  } from '#lib/kube/preview.ts';
   import { apiVersion, type Preview, type PreviewApp } from '#lib/kube/types.ts';
   import { findPreview, restoreLabel, snapshotsOf } from '#lib/model.ts';
 
@@ -82,6 +78,9 @@
   const valueOf = (name: string) => (Object.hasOwn(values, name) ? values[name] : undefined) ?? '';
 
   const missing = $derived(missingParameters(parameters, values).length > 0);
+  const invalid = $derived(
+    parameters.some((parameter) => parameter.type === 'integer' && integerError(valueOf(parameter.name)) !== undefined),
+  );
 
   const onSubmit = () => {
     const restoreFrom = restore.startsWith('name:')
@@ -99,7 +98,7 @@
   icon={false}
   size="medium"
   submitText={preview ? 'Save' : 'Create'}
-  disabled={name === '' || nameError !== undefined || missing}
+  disabled={name === '' || nameError !== undefined || missing || invalid}
   onClose={() => onClose()}
   {onSubmit}
 >
@@ -122,7 +121,7 @@
           />
         </Field>
       {:else if input === 'boolean'}
-        <Field label={parameter.title} description={parameter.description}>
+        <Field label={parameter.title} description={parameter.description} {required}>
           <Switch
             checked={valueOf(parameter.name) === 'true'}
             onCheckedChange={(checked) => (values = withParameter(values, parameter, String(checked)))}
@@ -130,12 +129,14 @@
         </Field>
       {:else if input === 'integer'}
         <Field label={parameter.title} description={parameter.description} {required}>
-          <NumberInput
-            bind:value={
-              () => (valueOf(parameter.name) === '' ? undefined : Number(valueOf(parameter.name))),
-              (value) => (values = withParameter(values, parameter, value === undefined ? '' : String(value)))
-            }
+          <!-- A text input keeps the value as typed: a JavaScript number can't hold every 64-bit integer. -->
+          <Input
+            inputmode="numeric"
+            bind:value={() => valueOf(parameter.name), (value) => (values = withParameter(values, parameter, value))}
           />
+          {#if integerError(valueOf(parameter.name))}
+            <HelperText color="danger">{integerError(valueOf(parameter.name))}</HelperText>
+          {/if}
         </Field>
       {:else}
         {@const repository = parameter.uiHint?.imageTag?.repository}

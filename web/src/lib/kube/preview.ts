@@ -119,9 +119,36 @@ export const withParameter = (
 /** Parameter is one of a PreviewApp's parameters. */
 export type Parameter = NonNullable<PreviewApp['spec']['parameters']>[number];
 
-/** parameterDefaults returns the values a new Preview starts with: the PreviewApp's defaults, empty ones included. */
+/**
+ * parameterDefaults returns the values a new Preview starts with: the PreviewApp's defaults, empty ones included. A
+ * required boolean without a default starts false, which its switch shows.
+ */
 export const parameterDefaults = (parameters: Parameter[]) =>
-  Object.fromEntries(parameters.flatMap(({ name, default: value }) => (value === undefined ? [] : [[name, value]])));
+  Object.fromEntries(
+    parameters.flatMap(({ name, type, required, default: value }) => {
+      if (value !== undefined) {
+        return [[name, value]];
+      }
+      return type === 'boolean' && required ? [[name, 'false']] : [];
+    }),
+  );
+
+const minInt64 = -(2n ** 63n);
+const maxInt64 = 2n ** 63n - 1n;
+
+/** integerError says why value isn't an integer parameter's value, a 64-bit integer as kupra parses it. Empty values are left out. */
+export const integerError = (value: string) => {
+  if (value === '') {
+    return;
+  }
+  if (!/^[+-]?\d+$/.test(value)) {
+    return 'must be an integer';
+  }
+  const number = BigInt(value);
+  if (number < minInt64 || number > maxInt64) {
+    return 'must be a 64-bit integer';
+  }
+};
 
 /** missingParameters returns the required parameters that have neither a value nor a default. An empty value counts. */
 export const missingParameters = (parameters: Parameter[], values: Record<string, string>) =>

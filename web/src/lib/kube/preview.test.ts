@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createdByAnnotation,
+  integerError,
   missingParameters,
   ownerLabel,
   owners,
@@ -170,5 +171,29 @@ describe(parameterInput.name, () => {
     expect(parameterInput({ name: 'b', title: 'B', type: 'boolean', enum: ['true'] })).toBe('enum');
     expect(parameterInput({ name: 'n', title: 'N', type: 'integer', enum: [] })).toBe('integer');
     expect(parameterInput({ name: 's', title: 'S' })).toBe('string');
+  });
+});
+
+describe('parameterDefaults for required booleans', () => {
+  it('starts a required boolean without a default at false, so the form can submit what its switch shows', () => {
+    const parameters = [{ name: 'b', title: 'B', type: 'boolean' as const, required: true }];
+    const values = parameterDefaults(parameters);
+    expect(values).toEqual({ b: 'false' });
+    expect(missingParameters(parameters, values)).toEqual([]);
+  });
+});
+
+describe(integerError.name, () => {
+  it('takes a 64-bit integer beyond what a JavaScript number holds exactly', () => {
+    expect(integerError('9007199254740993')).toBeUndefined();
+    expect(integerError('-9223372036854775808')).toBeUndefined();
+  });
+
+  it.each(['1.5', 'ten', '9223372036854775808'])('rejects %j', (value) => {
+    expect(integerError(value)).toBeDefined();
+  });
+
+  it('leaves empty values to the default', () => {
+    expect(integerError('')).toBeUndefined();
   });
 });
