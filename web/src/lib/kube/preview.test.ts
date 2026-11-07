@@ -79,10 +79,19 @@ describe(phaseColor.name, () => {
 
 describe(withParameter.name, () => {
   it('sets a value', () => {
-    expect(withParameter({ tag: 'main' }, 'workers', '2')).toEqual({ tag: 'main', workers: '2' });
+    expect(withParameter({ tag: 'main' }, { name: 'workers', type: 'integer' }, '2')).toEqual({
+      tag: 'main',
+      workers: '2',
+    });
   });
 
-  it('leaves out a cleared value, so the default applies rather than an invalid empty integer', () => {
-    expect(withParameter({ tag: 'main', workers: '2' }, 'workers', '')).toEqual({ tag: 'main' });
+  it('leaves out a cleared integer, so the default applies rather than an invalid empty value', () => {
+    expect(withParameter({ tag: 'main', workers: '2' }, { name: 'workers', type: 'integer' }, '')).toEqual({
+      tag: 'main',
+    });
+  });
+
+  it('keeps an empty string, which overrides a default', () => {
+    expect(withParameter({ tag: 'main' }, { name: 'tag' }, '')).toEqual({ tag: '' });
   });
 });

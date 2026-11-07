@@ -94,8 +94,12 @@ export const parameterRows = (preview: Preview, app: PreviewApp | undefined): Pa
 /** ownerLabel returns how the dashboard names an owner: users by name, and others by kind and name. */
 export const ownerLabel = ({ kind, name }: Owner) => (kind === 'User' ? name : `${kind} ${name}`);
 
-/** withParameter returns a Preview's parameter values with one set, or left out when it's empty, so the PreviewApp's default applies. */
-export const withParameter = (values: Record<string, string>, name: string, value: string) => {
+/** withParameter returns a Preview's parameter values with one set. An empty integer is left out, so the PreviewApp's default applies; an empty string is a value of its own. */
+export const withParameter = (
+  values: Record<string, string>,
+  { name, type }: { name: string; type?: string },
+  value: string,
+) => {
   const { [name]: _, ...rest } = values;
-  return value === '' ? rest : { ...rest, [name]: value };
+  return value === '' && type === 'integer' ? rest : { ...rest, [name]: value };
 };

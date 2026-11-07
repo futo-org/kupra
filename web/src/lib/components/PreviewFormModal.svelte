@@ -123,7 +123,7 @@
           <NumberInput
             bind:value={
               () => (valueOf(parameter.name) === '' ? undefined : Number(valueOf(parameter.name))),
-              (value) => (values = withParameter(values, parameter.name, value === undefined ? '' : String(value)))
+              (value) => (values = withParameter(values, parameter, value === undefined ? '' : String(value)))
             }
           />
         </Field>
@@ -132,7 +132,7 @@
           <Select
             options={parameter.enum}
             bind:value={
-              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter.name, value))
+              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter, value))
             }
           />
         </Field>
@@ -146,7 +146,7 @@
         >
           <Input
             bind:value={
-              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter.name, value))
+              () => values[parameter.name] ?? '', (value) => (values = withParameter(values, parameter, value))
             }
           />
         </Field>
