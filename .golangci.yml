@@ -51,3 +51,15 @@ linters:
               desc: only the controllers talk to the API server
             - pkg: k8s.io/client-go
               desc: only the controllers talk to the API server
+        # The dashboard faces the web, so it holds none of the operator's permissions or code (ADR 7).
+        dashboard:
+          files:
+            - "**/internal/dashboard/*.go"
+            - "**/cmd/dashboard/*.go"
+          deny:
+            - pkg: github.com/futo-org/kupra/internal/controller
+              desc: the dashboard acts only as its users, through the API
+            - pkg: github.com/futo-org/kupra/internal/state
+              desc: the dashboard acts only as its users, through the API
+            - pkg: github.com/futo-org/kupra/internal/render
+              desc: the dashboard acts only as its users, through the API

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Install the dashboard frontend's dependencies"
+#MISE sources=["web/package.json", "web/pnpm-lock.yaml"]
+#MISE outputs=["web/node_modules/.pnpm/lock.yaml"]
+set -euo pipefail
+
+pnpm --dir web install --frozen-lockfile

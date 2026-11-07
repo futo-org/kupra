@@ -1,0 +1,5 @@
+node_modules
+/build
+/.svelte-kit
+pnpm-lock.yaml
+src/lib/kube/gen

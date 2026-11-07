@@ -30,3 +30,12 @@ It takes a dict with ctx, the root context, labels, and optionally extra, and no
 {{- define "kupra.operator.labels" -}}
 {{- include "kupra.labelsWith" (dict "ctx" . "labels" (include "kupra.operator.selectorLabels" . | fromYaml)) }}
 {{- end }}
+
+{{- define "kupra.dashboard.selectorLabels" -}}
+app.kubernetes.io/name: kupra-dashboard
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{- define "kupra.dashboard.labels" -}}
+{{- include "kupra.labelsWith" (dict "ctx" . "labels" (include "kupra.dashboard.selectorLabels" . | fromYaml)) }}
+{{- end }}

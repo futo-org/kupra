@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "node_modules/.cache/crd-generate",
+    "outDir": "src/lib/kube/gen",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "skipLibCheck": true,
+    "strict": true
+  },
+  "include": ["node_modules/.cache/crd-generate/kupra.futo.tech/v1alpha1/*.ts"]
+}

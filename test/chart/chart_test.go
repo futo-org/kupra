@@ -3,9 +3,11 @@ package chart
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,9 +34,18 @@ func render(t *testing.T, args ...string) []unstructured.Unstructured {
 	return objs
 }
 
+// dashboard turns the dashboard on, so tests cover its objects too.
+var dashboard = []string{
+	"--set", "dashboard.enabled=true",
+	"--set", "dashboard.publicURL=https://previews.example.com",
+	"--set", "dashboard.oidc.issuerURL=https://id.example.com",
+	"--set", "dashboard.oidc.clientID=kupra",
+	"--set", "dashboard.existingSecret=kupra-dashboard",
+}
+
 // Every object the chart templates carries its labels, so a release's objects can be found together. Helm applies CRDs without templating them. ClusterRoles don't get commonLabels, which other ClusterRoles could aggregate them by.
 func TestObjectsAreLabelled(t *testing.T) {
-	for _, u := range render(t, "--set", "commonLabels.example=yes") {
+	for _, u := range render(t, append(dashboard, "--set", "commonLabels.example=yes")...) {
 		labels := u.GetLabels()
 		if labels["app.kubernetes.io/part-of"] != "kupra" {
 			t.Errorf("%s %s isn't labelled app.kubernetes.io/part-of: kupra", u.GetKind(), u.GetName())
@@ -48,9 +59,9 @@ func TestObjectsAreLabelled(t *testing.T) {
 	}
 }
 
-// commonLabels can't replace the labels the operator's Deployment and Service select its pods by.
+// commonLabels can't replace the labels Deployments and Services select their pods by.
 func TestCommonLabelsKeepSelectors(t *testing.T) {
-	objs := render(t, "--set", "commonLabels.app\\.kubernetes\\.io/name=custom", "--set", "commonLabels.app\\.kubernetes\\.io/instance=custom")
+	objs := render(t, append(dashboard, "--set", "commonLabels.app\\.kubernetes\\.io/name=custom", "--set", "commonLabels.app\\.kubernetes\\.io/instance=custom")...)
 	for _, u := range objs {
 		var selector map[string]string
 		switch u.GetKind() {
@@ -63,27 +74,27 @@ func TestCommonLabelsKeepSelectors(t *testing.T) {
 		}
 		var pods map[string]string
 		for _, d := range objs {
-			if d.GetKind() == "Deployment" {
+			if d.GetKind() == "Deployment" && d.GetName() == strings.TrimSuffix(u.GetName(), "-metrics") {
 				pods, _, _ = unstructured.NestedStringMap(d.Object, "spec", "template", "metadata", "labels")
 			}
 		}
 		for k, v := range selector {
 			if pods[k] != v {
-				t.Errorf("%s %s selects %s=%s, but the operator's pods have %q", u.GetKind(), u.GetName(), k, v, pods[k])
+				t.Errorf("%s %s selects %s=%s, but its pods have %q", u.GetKind(), u.GetName(), k, v, pods[k])
 			}
 		}
 	}
 }
 
-// operator.podLabels win over commonLabels on the operator's pods.
+// podLabels win over commonLabels on each component's pods.
 func TestPodLabelsWin(t *testing.T) {
-	for _, u := range render(t, "--set", "commonLabels.team=common", "--set", "operator.podLabels.team=pods") {
+	for _, u := range render(t, append(dashboard, "--set", "commonLabels.team=common", "--set", "operator.podLabels.team=pods", "--set", "dashboard.podLabels.team=pods")...) {
 		if u.GetKind() != "Deployment" {
 			continue
 		}
 		pods, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "labels")
 		if pods["team"] != "pods" {
-			t.Errorf("the operator's pods are labelled team %q, want podLabels' pods", pods["team"])
+			t.Errorf("%s's pods are labelled team %q, want podLabels' pods", u.GetName(), pods["team"])
 		}
 	}
 }
@@ -101,4 +112,28 @@ func TestRendersAsDependency(t *testing.T) {
 	if out, err := exec.Command("helm", "template", "umbrella", umbrella, "--set", "global.example=yes").CombinedOutput(); err != nil {
 		t.Errorf("rendering kupra as a dependency: %v\n%s", err, out)
 	}
+}
+
+// The dashboard needs its settings, and says which is missing.
+func TestDashboardNeedsSettings(t *testing.T) {
+	out, err := exec.Command("helm", "template", "kupra", "../../charts/kupra", "--set", "dashboard.enabled=true").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "dashboard.publicURL is required") {
+		t.Errorf("rendering the dashboard without settings gives %q, want dashboard.publicURL required", out)
+	}
+}
+
+// The dashboard runs one pod at a time, also while updating, as pods don't share refreshes of a session.
+func TestDashboardRunsOnePod(t *testing.T) {
+	for _, u := range render(t, dashboard...) {
+		if u.GetKind() != "Deployment" || u.GetName() != "kupra-dashboard" {
+			continue
+		}
+		replicas, _, _ := unstructured.NestedFieldNoCopy(u.Object, "spec", "replicas")
+		strategy, _, _ := unstructured.NestedString(u.Object, "spec", "strategy", "type")
+		if fmt.Sprint(replicas) != "1" || strategy != "Recreate" {
+			t.Errorf("dashboard runs %v replicas with strategy %q, want 1 with Recreate", replicas, strategy)
+		}
+		return
+	}
+	t.Error("the chart has no kupra-dashboard Deployment")
 }
