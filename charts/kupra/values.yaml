@@ -98,7 +98,6 @@ dashboard:
     scopes: [openid, profile, email, groups, offline_access]
   # A Secret with the OIDC client's secret in client-secret, and at least 32 random characters in cookie-secret, which encrypts sessions.
   existingSecret: ""
-  replicas: 1
   image:
     repository: ghcr.io/futo-org/kupra-dashboard
     tag: ""

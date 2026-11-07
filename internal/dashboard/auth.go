@@ -160,10 +160,16 @@ func (a *authenticator) token(w http.ResponseWriter, r *http.Request) (string, e
 		defer cancel()
 		return a.refresh(a.context(ctx), s.RefreshToken)
 	})
-	if err != nil {
-		ctrl.LoggerFrom(r.Context()).Info("refreshing a session failed", "error", err.Error())
+	var refused *oauth2.RetrieveError
+	if errors.As(err, &refused) && refused.Response != nil && refused.Response.StatusCode < http.StatusInternalServerError {
+		// The provider refused the refresh token, so the session is over.
+		ctrl.LoggerFrom(r.Context()).Info("provider refused to refresh a session", "error", err.Error())
 		a.sealer.clear(w, r, sessionCookie, "/")
 		return "", errSignedOut
+	}
+	if err != nil {
+		// Otherwise the session is kept, so a later request can try again.
+		return "", fmt.Errorf("refreshing the session: %w", err)
 	}
 	if err := a.sealer.set(w, r, sessionCookie, "/", sessionLifetime, refreshed); err != nil {
 		return "", err

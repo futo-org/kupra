@@ -55,7 +55,6 @@
           }
         },
         "existingSecret": {"description": "A Secret with client-secret and cookie-secret.", "type": "string"},
-        "replicas": {"type": "integer", "minimum": 0},
         "image": {
           "type": "object",
           "additionalProperties": false,

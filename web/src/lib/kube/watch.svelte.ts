@@ -2,6 +2,7 @@ import { api } from '#lib/api/index.ts';
 import { listWatchClient, type Query } from './client.ts';
 import type { Kinds } from './kupra.gen.ts';
 import type { Kind } from './paths.ts';
+import { poll } from './poll.ts';
 import { initialState, listWatch, type ListWatchState } from './watch.ts';
 
 /**
@@ -25,14 +26,21 @@ export const watchList = <K extends Kind>(query: () => Query<K> | undefined) => 
   };
 };
 
-/** watchLists keeps a collection up to date in each of the namespaces, for as long as the calling component lives. */
-export const watchLists = <K extends Kind>(kind: K, namespaces: () => string[]) => {
+/**
+ * pollLists keeps a collection up to date in each of the namespaces, for as long as the calling component lives. It lists
+ * them every interval rather than watching them, as a watch holds a connection open, and browsers allow only six per
+ * origin over HTTP/1.1.
+ */
+export const pollLists = <K extends Kind>(kind: K, namespaces: () => string[]) => {
   let states = $state.raw<Record<string, ListWatchState<Kinds[K]>>>({});
   $effect(() => {
     const list = namespaces();
     states = Object.fromEntries(list.map((namespace) => [namespace, initialState()]));
     const stops = list.map((namespace) =>
-      listWatch(listWatchClient(api, { kind, namespace }), (next) => (states = { ...states, [namespace]: next })),
+      poll(
+        (signal) => listWatchClient(api, { kind, namespace }).list(signal),
+        (next) => (states = { ...states, [namespace]: next }),
+      ),
     );
     return () => {
       for (const stop of stops) {

@@ -43,7 +43,10 @@ metadata:
   labels:
     {{- include "kupra.dashboard.labels" $ | nindent 4 }}
 spec:
-  replicas: {{ .replicas }}
+  # One pod at a time, also while updating: pods don't share refreshes, and providers that rotate refresh tokens accept each once, so two pods refreshing the same session would sign its user out.
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "kupra.dashboard.selectorLabels" $ | nindent 6 }}

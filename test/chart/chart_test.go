@@ -3,6 +3,7 @@ package chart
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,4 +120,20 @@ func TestDashboardNeedsSettings(t *testing.T) {
 	if err == nil || !strings.Contains(string(out), "dashboard.publicURL is required") {
 		t.Errorf("rendering the dashboard without settings gives %q, want dashboard.publicURL required", out)
 	}
+}
+
+// The dashboard runs one pod at a time, also while updating, as pods don't share refreshes of a session.
+func TestDashboardRunsOnePod(t *testing.T) {
+	for _, u := range render(t, dashboard...) {
+		if u.GetKind() != "Deployment" || u.GetName() != "kupra-dashboard" {
+			continue
+		}
+		replicas, _, _ := unstructured.NestedFieldNoCopy(u.Object, "spec", "replicas")
+		strategy, _, _ := unstructured.NestedString(u.Object, "spec", "strategy", "type")
+		if fmt.Sprint(replicas) != "1" || strategy != "Recreate" {
+			t.Errorf("dashboard runs %v replicas with strategy %q, want 1 with Recreate", replicas, strategy)
+		}
+		return
+	}
+	t.Error("the chart has no kupra-dashboard Deployment")
 }

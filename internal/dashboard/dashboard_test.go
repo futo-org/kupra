@@ -33,6 +33,8 @@ type provider struct {
 	mu        sync.Mutex
 	nonces    map[string]string // by code
 	refreshed int
+	// unavailable is how many more refreshes fail with 503 Service Unavailable.
+	unavailable int
 	// refreshToken is the one refresh token the provider accepts.
 	refreshToken string
 	revoked      []string
@@ -81,6 +83,11 @@ func newProvider(t *testing.T) *provider {
 				return
 			}
 		case "refresh_token":
+			if p.unavailable > 0 {
+				p.unavailable--
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			// Refresh tokens rotate: each is accepted once.
 			if r.Form.Get("refresh_token") != p.refreshToken {
 				http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
@@ -465,5 +472,31 @@ func TestSealer(t *testing.T) {
 	other, _ := newSealer(strings.Repeat("o", 32), true)
 	if other.get(req, sessionCookie, &got) {
 		t.Error("session opens with another secret")
+	}
+}
+
+// A refresh that fails for a while keeps the session, so the next request can refresh it. One the provider refuses ends it.
+func TestRefreshFailures(t *testing.T) {
+	f := newFixture(t)
+	f.provider.ttl = refreshMargin / 2
+	f.signIn(t, "/")
+	const path = "/api/kube/apis/kupra.futo.tech/v1alpha1/previews"
+
+	f.provider.unavailable = 1
+	if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusBadGateway {
+		t.Errorf("request while the provider is unavailable is %d, want 502", code)
+	}
+	if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusOK {
+		t.Errorf("request once the provider is back is %d, want 200", code)
+	}
+
+	f.provider.mu.Lock()
+	f.provider.refreshToken = "revoked"
+	f.provider.mu.Unlock()
+	if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusUnauthorized {
+		t.Errorf("request with a refused refresh token is %d, want 401", code)
+	}
+	if code, _ := f.do(t, http.MethodGet, "/api/session", nil); code != http.StatusUnauthorized {
+		t.Errorf("session after a refused refresh is %d, want 401", code)
 	}
 }

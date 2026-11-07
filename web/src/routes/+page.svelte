@@ -4,7 +4,7 @@
   import { getAppNamespaces } from '#lib/api/index.ts';
   import ReadyBadge from '#lib/components/ReadyBadge.svelte';
   import { groupApps } from '#lib/kube/apps.ts';
-  import { watchLists } from '#lib/kube/watch.svelte.ts';
+  import { pollLists } from '#lib/kube/watch.svelte.ts';
 
   let namespaces = $state<string[]>([]);
   let namespacesError = $state<Error>();
@@ -26,7 +26,7 @@
     return () => controller.abort();
   });
 
-  const apps = watchLists('PreviewApp', () => namespaces);
+  const apps = pollLists('PreviewApp', () => namespaces);
   const grouped = $derived(groupApps(apps.current));
 </script>
 
@@ -44,7 +44,7 @@
       <section>
         <Heading tag="h2" size="small" class="mb-2">{group.namespace}</Heading>
         {#if group.error}
-          <Alert color="warning" title="Live updates stopped, retrying">{group.error.message}</Alert>
+          <Alert color="warning" title="Can't refresh, retrying">{group.error.message}</Alert>
         {/if}
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {#each group.apps as app (app.metadata?.name)}
