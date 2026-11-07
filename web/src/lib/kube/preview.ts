@@ -121,15 +121,15 @@ export type Parameter = NonNullable<PreviewApp['spec']['parameters']>[number];
 
 /**
  * parameterDefaults returns the values a new Preview starts with: the PreviewApp's defaults, empty ones included. A
- * required boolean without a default starts false, which its switch shows.
+ * required boolean without a default starts at its first allowed value, or false, which its switch shows.
  */
 export const parameterDefaults = (parameters: Parameter[]) =>
   Object.fromEntries(
-    parameters.flatMap(({ name, type, required, default: value }) => {
+    parameters.flatMap(({ name, type, required, enum: allowed, default: value }) => {
       if (value !== undefined) {
         return [[name, value]];
       }
-      return type === 'boolean' && required ? [[name, 'false']] : [];
+      return type === 'boolean' && required ? [[name, allowed?.[0] ?? 'false']] : [];
     }),
   );
 
