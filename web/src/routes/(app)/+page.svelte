@@ -53,7 +53,7 @@
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {#each group.apps as app (app.metadata?.name)}
             {@const name = app.metadata?.name ?? ''}
-            <a href={resolve('/apps/[namespace]/[app]', { namespace: group.namespace, app: name })}>
+            <a href={resolve('/(app)/apps/[namespace]/[app]', { namespace: group.namespace, app: name })}>
               <Card>
                 <CardHeader>
                   <div class="flex items-center justify-between gap-2">

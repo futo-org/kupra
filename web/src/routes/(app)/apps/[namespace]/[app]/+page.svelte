@@ -37,7 +37,7 @@
 
 <Breadcrumbs
   class="mb-2"
-  items={[{ title: 'Apps', href: resolve('/') }, { title: params.namespace }, { title: params.app }]}
+  items={[{ title: 'Apps', href: resolve('/(app)') }, { title: params.namespace }, { title: params.app }]}
 />
 
 <div class="mb-4 flex items-center gap-3">
@@ -73,7 +73,7 @@
                 <TableCell>
                   <a
                     class="underline"
-                    href={resolve('/apps/[namespace]/[app]/[preview]', { ...params, preview: name })}
+                    href={resolve('/(app)/apps/[namespace]/[app]/[preview]', { ...params, preview: name })}
                   >
                     {name}
                   </a>

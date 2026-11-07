@@ -45,9 +45,9 @@
 <Breadcrumbs
   class="mb-2"
   items={[
-    { title: 'Apps', href: resolve('/') },
+    { title: 'Apps', href: resolve('/(app)') },
     { title: params.namespace },
-    { title: params.app, href: resolve('/apps/[namespace]/[app]', params) },
+    { title: params.app, href: resolve('/(app)/apps/[namespace]/[app]', params) },
     { title: params.preview },
   ]}
 />
