@@ -3,5 +3,4 @@
 set -euo pipefail
 
 export KUBECONFIG="$PWD/.e2e/kubeconfig"
-# Temporary, to reproduce a flake: the whole suite, repeatedly, with the in-process operator's log (-v).
-go test -tags e2e -v -count 3 -failfast -timeout 90m ./test/e2e/...
+go test -tags e2e -count 1 -timeout 45m ./test/e2e/...

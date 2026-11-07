@@ -28,7 +28,7 @@ for ns in $(k get namespaces -o jsonpath='{range .items[?(@.metadata.deletionTim
   k get namespace "$ns" -o yaml
   for resource in $(k api-resources --namespaced --verbs=list -o name); do
     k -n "$ns" get "$resource" --ignore-not-found --show-managed-fields \
-      -o custom-columns=KIND:.kind,NAME:.metadata.name,UID:.metadata.uid,CREATED:.metadata.creationTimestamp,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers,WRITES:.metadata.managedFields[*].time,BY:.metadata.managedFields[*].manager 2>/dev/null | tail -n +2
+      -o custom-columns=KIND:.kind,NAME:.metadata.name,UID:.metadata.uid,CREATED:.metadata.creationTimestamp,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers,WRITES:.metadata.managedFields[*].time,BY:.metadata.managedFields[*].manager | tail -n +2
   done
   k -n kube-system logs -l component=kube-controller-manager --tail=-1 | grep -F "$ns"
   k -n kube-system logs -l component=kube-apiserver --tail=-1 | grep -F "$ns" | tail -50
