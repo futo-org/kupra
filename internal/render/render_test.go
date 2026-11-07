@@ -425,6 +425,72 @@ template:
 	}
 }
 
+// TestEvalErrors checks that an expression failing as it renders is reported at its field, with the expression as the value.
+func TestEvalErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, spec, want string
+	}{
+		{
+			name: "variable",
+			spec: `
+variables:
+  - name: team
+    expression: preview.labels.team
+`,
+			want: `spec.variables[team].expression: Invalid value: "preview.labels.team": no such key: team`,
+		},
+		{
+			name: "link",
+			spec: `
+links:
+  - name: team
+    urlExpr: preview.labels.team
+`,
+			want: `spec.links[team].urlExpr: Invalid value: "preview.labels.team": no such key: team`,
+		},
+		{
+			name: "include setting",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: config
+        annotations:
+          kupra.futo.tech/include: preview.labels.team == "a"
+`,
+			want: `spec.template.resources[0].metadata.annotations[kupra.futo.tech/include]: Invalid value: "preview.labels.team == \"a\"": no such key: team`,
+		},
+		{
+			name: "field",
+			spec: `
+template:
+  resources:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        nameExpr: preview.labels.team
+`,
+			want: `spec.template.resources[0].metadata.nameExpr: Invalid value: "preview.labels.team": no such key: team`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, errs := Compile(appSpec(t, tc.spec))
+			if len(errs) > 0 {
+				t.Fatalf("compiling: %v", errs.ToAggregate())
+			}
+			_, err := app.Render(preview, nil)
+			if err == nil {
+				t.Fatalf("rendered without errors, want %q", tc.want)
+			}
+			if err.Error() != tc.want {
+				t.Errorf("error = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestExamples(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "..", "docs", "examples", "*.yaml"))
 	if err != nil || len(files) == 0 {
