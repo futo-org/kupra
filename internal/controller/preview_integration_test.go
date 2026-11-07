@@ -430,11 +430,30 @@ template:
 	})
 
 	t.Run("deletion", func(t *testing.T) {
-		// envtest has no namespace controller, so the namespace never finishes deleting. The kind end-to-end tests cover the rest.
+		// The preview's resources go before its namespace. envtest has no garbage collector, which finishDeletions plays, and no namespace controller, so the namespace never finishes deleting. The kind end-to-end tests cover the rest.
 		if err := k8s.Delete(ctx, getPreview(t, "previews", "pr-1")); err != nil {
 			t.Fatal(err)
 		}
 		eventually(t, func() error {
+			finishDeletions(t, nsName)
+			var ns corev1.Namespace
+			if err := k8s.Get(ctx, client.ObjectKey{Name: nsName}, &ns); err != nil {
+				return err
+			}
+			var config corev1.ConfigMap
+			err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "config"}, &config)
+			switch {
+			case err == nil && !ns.DeletionTimestamp.IsZero():
+				t.Errorf("namespace is being deleted while ConfigMap config is still there, want the preview's resources deleted first")
+			case err == nil:
+				return fmt.Errorf("ConfigMap config is still there")
+			case !apierrors.IsNotFound(err):
+				return err
+			}
+			return nil
+		})
+		eventually(t, func() error {
+			finishDeletions(t, nsName)
 			p := getPreview(t, "previews", "pr-1")
 			var ns corev1.Namespace
 			if err := k8s.Get(ctx, client.ObjectKey{Name: nsName}, &ns); err != nil {
