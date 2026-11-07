@@ -96,9 +96,8 @@ export const listWatch = <T extends KubeObject>(
     }
   };
 
-  // recovered clears the last error.
+  // recovered clears the last error. The backoff is only reset by progress, since a watch can start and then fail.
   const recovered = () => {
-    attempt = 0;
     if (error) {
       error = undefined;
       emit();
@@ -133,10 +132,9 @@ export const listWatch = <T extends KubeObject>(
             emit();
           }
           received = true;
-        }
-        if (received) {
           attempt = 0;
-        } else {
+        }
+        if (!received) {
           // A watch that ends without any events is retried with a backoff, so it can't loop.
           await sleep(delay(attempt++), signal);
         }

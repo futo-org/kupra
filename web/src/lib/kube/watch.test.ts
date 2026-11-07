@@ -187,10 +187,24 @@ describe(listWatch.name, () => {
   });
 
   it('backs off a watch that ends without events', async () => {
-    const { client, calls } = fakeClient([list('5')], [events(), events()]);
+    const { client, calls } = fakeClient([list('5')], [events(), events(), events()]);
     const { delays, stop } = run(client);
-    await vi.waitFor(() => expect(calls).toEqual(['list', 'watch 5', 'watch 5', 'watch 5']));
-    expect(delays).toEqual([0, 0]);
+    await vi.waitFor(() => expect(calls).toEqual(['list', 'watch 5', 'watch 5', 'watch 5', 'watch 5']));
+    expect(delays).toEqual([0, 1, 2]);
+    stop();
+  });
+
+  it('backs off watches that start and then fail, until one makes progress', async () => {
+    const failing = (): AsyncIterable<WatchEvent<Item>> => ({
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new TypeError('network error')) }),
+    });
+    const { client, calls } = fakeClient(
+      [list('5')],
+      [failing(), failing(), events({ type: 'ADDED', object: item('a', '6') }), failing()],
+    );
+    const { delays, stop } = run(client);
+    await vi.waitFor(() => expect(calls).toHaveLength(6));
+    expect(delays).toEqual([0, 1, 0]);
     stop();
   });
 
