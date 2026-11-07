@@ -78,8 +78,6 @@ spec:
           args:
             - --bind-address=:8080
             - --public-url={{ required "dashboard.publicURL is required" .publicURL }}
-            # ko puts the built page, from cmd/dashboard/kodata, here in the image.
-            - --static-dir=/var/run/ko
             {{- with .oidc.issuerURL }}
             - --oidc-issuer-url={{ . }}
             {{- end }}

@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import type { ProxyOptions } from 'vite';
 import { defineConfig } from 'vitest/config';
 
-const output = '../cmd/dashboard/kodata';
+const output = 'build';
 
 // KUPRA_DASHBOARD_URL is the dashboard backend that the dev server passes /api and /auth to.
 const backend: ProxyOptions = {
@@ -25,7 +25,7 @@ export default defineConfig({
       compilerOptions: {
         runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true),
       },
-      // ko ships kodata in the dashboard's image, where the backend serves it.
+      // mise run web:build copies the build into internal/dashboard/page, which the backend embeds.
       adapter: adapter({ pages: output, assets: output, fallback: 'index.html' }),
       // The backend serves the page without a CSP of its own, apart from frame-ancestors.
       csp: {

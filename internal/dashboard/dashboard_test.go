@@ -11,11 +11,10 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -206,10 +205,6 @@ func newFixture(t *testing.T) *fixture {
 func newFixtureWith(t *testing.T, p *provider, cfg *rest.Config) *fixture {
 	t.Helper()
 	f := &fixture{provider: p}
-	static := t.TempDir()
-	if err := os.WriteFile(filepath.Join(static, "index.html"), []byte("<p>kupra</p>"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	var handler http.Handler
 	f.dashboard = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }))
 	t.Cleanup(f.dashboard.Close)
@@ -222,7 +217,7 @@ func newFixtureWith(t *testing.T, p *provider, cfg *rest.Config) *fixture {
 		Scopes:       []string{"openid", "offline_access"},
 		Config:       cfg,
 		HTTPClient:   p.Client(),
-		StaticDir:    static,
+		Page:         fstest.MapFS{"index.html": {Data: []byte("<p>kupra</p>")}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -551,5 +546,14 @@ func TestSessions(t *testing.T) {
 	otherHash, otherBlock, _ := cookieKeys("rotated-secret", "sessions")
 	if _, ok := newSessions(otherHash, otherBlock, true).get(req); ok {
 		t.Error("session opens after the client secret changed")
+	}
+}
+
+// A dashboard built without its page says how to build it, rather than serving an empty directory.
+func TestSPAWithoutPage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	spa(fstest.MapFS{".gitkeep": {}}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/apps/immich", nil))
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "mise run web:build") {
+		t.Errorf("page without a build is %d %q, want 503 saying to run mise run web:build", rec.Code, rec.Body.String())
 	}
 }

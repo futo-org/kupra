@@ -18,13 +18,12 @@ import (
 )
 
 func main() {
-	var addr, publicURL, issuerURL, clientID, scopes, staticDir string
+	var addr, publicURL, issuerURL, clientID, scopes string
 	flag.StringVar(&addr, "bind-address", ":8080", "The address the dashboard serves on.")
 	flag.StringVar(&publicURL, "public-url", "", "The URL people reach the dashboard at.")
 	flag.StringVar(&issuerURL, "oidc-issuer-url", os.Getenv("OIDC_ISSUER_URL"), "The OIDC provider's issuer URL. Defaults to $OIDC_ISSUER_URL.")
 	flag.StringVar(&clientID, "oidc-client-id", os.Getenv("OIDC_CLIENT_ID"), "The dashboard's OIDC client ID. Defaults to $OIDC_CLIENT_ID.")
 	flag.StringVar(&scopes, "oidc-scopes", "openid,profile,email,groups,offline_access", "The scopes to request, comma-separated.")
-	flag.StringVar(&staticDir, "static-dir", "", "The directory holding the built page.")
 	logOpts := zap.Options{}
 	logOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -40,7 +39,6 @@ func main() {
 		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 		Scopes:       strings.Split(scopes, ","),
 		Config:       ctrl.GetConfigOrDie(),
-		StaticDir:    staticDir,
 	})
 	if err != nil {
 		log.Error(err, "unable to set up the dashboard")

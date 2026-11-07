@@ -5,11 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
-	"strings"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,8 +33,8 @@ type Options struct {
 	Scopes       []string
 	// Config reaches the Kubernetes API server. Its credentials are the dashboard's own, and are only used to find namespaces with apps.
 	Config *rest.Config
-	// StaticDir holds the built page.
-	StaticDir string
+	// Page is the built page to serve. It's the one embedded in the binary when nil.
+	Page fs.FS
 	// HTTPClient talks to the identity provider. It's http.DefaultClient when nil.
 	HTTPClient *http.Client
 }
@@ -75,7 +74,11 @@ func New(ctx context.Context, opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /api/session", h.session)
 	mux.Handle("GET /api/watch", &watchHandler{auth: auth, anonymous: anonymous, own: own})
 	mux.Handle(kubePrefix+"/", newKubeProxy(auth, server, transport))
-	mux.Handle("/", spa(opts.StaticDir))
+	page := opts.Page
+	if page == nil {
+		page = builtPage()
+	}
+	mux.Handle("/", spa(page))
 	return securityHeaders(csrf(mux)), nil
 }
 
@@ -126,23 +129,6 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
-	})
-}
-
-// spa serves the built page, and its index for any path that isn't a file, so the page's own routes load.
-func spa(dir string) http.Handler {
-	files := http.FileServer(http.Dir(dir))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
-			http.NotFound(w, r)
-			return
-		}
-		if info, err := os.Stat(path.Join(dir, path.Clean(r.URL.Path))); err != nil || info.IsDir() {
-			w.Header().Set("Cache-Control", "no-cache")
-			http.ServeFile(w, r, path.Join(dir, "index.html"))
-			return
-		}
-		files.ServeHTTP(w, r)
 	})
 }
 

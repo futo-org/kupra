@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-#MISE description="Build the dashboard frontend into cmd/dashboard/kodata, which ko ships in the dashboard's image"
+#MISE description="Build the dashboard frontend into internal/dashboard/page, which the dashboard's binary embeds"
 #MISE depends=["web:install"]
 set -euo pipefail
 
 pnpm --dir web run build
+find internal/dashboard/page -mindepth 1 ! -name .gitkeep -delete
+cp -R web/build/. internal/dashboard/page/

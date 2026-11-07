@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -42,7 +41,6 @@ func TestDevServer(t *testing.T) {
 		ClientSecret: "secret",
 		Scopes:       []string{"openid", "offline_access"},
 		Config:       cfg,
-		StaticDir:    filepath.Join("..", "..", "cmd", "dashboard", "kodata"),
 		HTTPClient:   p.Client(),
 	})
 	if err != nil {

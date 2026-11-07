@@ -2,4 +2,6 @@
 *.test
 *.out
 /.e2e/
-/cmd/dashboard/kodata/
+# The dashboard embeds its built page from here; .gitkeep keeps the directory for builds without it.
+/internal/dashboard/page/*
+!/internal/dashboard/page/.gitkeep
