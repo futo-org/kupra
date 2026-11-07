@@ -86,7 +86,6 @@ export const previewActions = (preview: () => Preview) => {
     resource: 'previews',
     name: preview().metadata?.name,
   });
-  const canUpdate = canI(() => target('update'));
   const canPatch = canI(() => target('patch'));
   const canDelete = canI(() => target('delete'));
   // Snapshotting a preview takes kupra's snapshot verb on it, as well as creating snapshots (ADR 6).
@@ -107,7 +106,8 @@ export const previewActions = (preview: () => Preview) => {
   const Edit: ActionItem = {
     title: 'Edit',
     icon: mdiPencilOutline,
-    $if: () => canUpdate() && !managed(),
+    // Saving patches the preview, so that's what Edit needs.
+    $if: () => canPatch() && !managed(),
     onAction: async () => {
       const app = findApp(preview().metadata?.namespace ?? '', preview().spec.appRef.name);
       const edited = app && (await modalManager.show(PreviewFormModal, { app, preview: preview() }));
