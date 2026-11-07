@@ -161,8 +161,8 @@ func (a *authenticator) token(w http.ResponseWriter, r *http.Request) (string, e
 		return a.refresh(a.context(ctx), s.RefreshToken)
 	})
 	var refused *oauth2.RetrieveError
-	if errors.As(err, &refused) && refused.Response != nil && refused.Response.StatusCode < http.StatusInternalServerError {
-		// The provider refused the refresh token, so the session is over.
+	if errors.As(err, &refused) && refused.ErrorCode == "invalid_grant" {
+		// The provider refused the refresh token, so the session is over. Other errors, like being rate limited, may pass.
 		ctrl.LoggerFrom(r.Context()).Info("provider refused to refresh a session", "error", err.Error())
 		a.sealer.clear(w, r, sessionCookie, "/")
 		return "", errSignedOut

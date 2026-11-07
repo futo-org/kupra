@@ -33,8 +33,8 @@ type provider struct {
 	mu        sync.Mutex
 	nonces    map[string]string // by code
 	refreshed int
-	// unavailable is how many more refreshes fail with 503 Service Unavailable.
-	unavailable int
+	// failures are the statuses the next refreshes fail with.
+	failures []int
 	// refreshToken is the one refresh token the provider accepts.
 	refreshToken string
 	revoked      []string
@@ -79,18 +79,19 @@ func newProvider(t *testing.T) *provider {
 		case "authorization_code":
 			var ok bool
 			if nonce, ok = p.nonces[r.Form.Get("code")]; !ok || r.Form.Get("code_verifier") == "" {
-				http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+				invalidGrant(w)
 				return
 			}
 		case "refresh_token":
-			if p.unavailable > 0 {
-				p.unavailable--
-				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			if len(p.failures) > 0 {
+				code := p.failures[0]
+				p.failures = p.failures[1:]
+				http.Error(w, http.StatusText(code), code)
 				return
 			}
 			// Refresh tokens rotate: each is accepted once.
 			if r.Form.Get("refresh_token") != p.refreshToken {
-				http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+				invalidGrant(w)
 				return
 			}
 			p.refreshed++
@@ -482,9 +483,11 @@ func TestRefreshFailures(t *testing.T) {
 	f.signIn(t, "/")
 	const path = "/api/kube/apis/kupra.futo.tech/v1alpha1/previews"
 
-	f.provider.unavailable = 1
-	if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusBadGateway {
-		t.Errorf("request while the provider is unavailable is %d, want 502", code)
+	f.provider.failures = []int{http.StatusServiceUnavailable, http.StatusTooManyRequests}
+	for _, failure := range f.provider.failures {
+		if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusBadGateway {
+			t.Errorf("request while the provider answers %d is %d, want 502", failure, code)
+		}
 	}
 	if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusOK {
 		t.Errorf("request once the provider is back is %d, want 200", code)
@@ -499,4 +502,11 @@ func TestRefreshFailures(t *testing.T) {
 	if code, _ := f.do(t, http.MethodGet, "/api/session", nil); code != http.StatusUnauthorized {
 		t.Errorf("session after a refused refresh is %d, want 401", code)
 	}
+}
+
+// invalidGrant refuses a grant the way OAuth 2.0 says to, with a JSON error.
+func invalidGrant(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 }
