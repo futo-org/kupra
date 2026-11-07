@@ -28,13 +28,11 @@ const csrfHeader = "X-Kupra-CSRF"
 type Options struct {
 	// PublicURL is where people reach the dashboard, such as https://previews.example.com.
 	PublicURL string
-	// IssuerURL, ClientID, ClientSecret and Scopes configure signing in with OIDC.
+	// IssuerURL, ClientID, ClientSecret and Scopes configure signing in with OIDC. The dashboard needs a confidential client: its cookies are encrypted with keys derived from ClientSecret.
 	IssuerURL    string
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
-	// CookieSecret encrypts the session's cookies.
-	CookieSecret string
 	// Config reaches the Kubernetes API server. Its credentials are the dashboard's own, and are only used to find namespaces with apps.
 	Config *rest.Config
 	// StaticDir holds the built page.
@@ -49,11 +47,7 @@ func New(ctx context.Context, opts Options) (http.Handler, error) {
 	if err != nil || public.Host == "" {
 		return nil, errors.New("public URL must be absolute")
 	}
-	s, err := newSealer(opts.CookieSecret, public.Scheme == "https")
-	if err != nil {
-		return nil, err
-	}
-	auth, err := newAuthenticator(ctx, opts, s)
+	auth, err := newAuthenticator(ctx, opts, public.Scheme == "https")
 	if err != nil {
 		return nil, err
 	}

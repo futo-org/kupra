@@ -39,7 +39,6 @@ func main() {
 		ClientID:     clientID,
 		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 		Scopes:       strings.Split(scopes, ","),
-		CookieSecret: os.Getenv("COOKIE_SECRET"),
 		Config:       ctrl.GetConfigOrDie(),
 		StaticDir:    staticDir,
 	})

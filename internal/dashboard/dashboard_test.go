@@ -212,7 +212,6 @@ func newFixture(t *testing.T) *fixture {
 		ClientID:     "kupra",
 		ClientSecret: "secret",
 		Scopes:       []string{"openid", "offline_access"},
-		CookieSecret: strings.Repeat("s", 32),
 		Config:       &rest.Config{Host: f.api.URL, BearerToken: "dashboard-token"},
 		StaticDir:    static,
 	})
@@ -426,66 +425,6 @@ func TestLocalRedirect(t *testing.T) {
 	}
 }
 
-func TestSealer(t *testing.T) {
-	s, err := newSealer(strings.Repeat("k", 32), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	long := session{IDToken: strings.Repeat("x", 3*chunkSize)}
-	rec := httptest.NewRecorder()
-	if err := s.set(rec, httptest.NewRequest(http.MethodGet, "/", nil), sessionCookie, "/", time.Hour, long); err != nil {
-		t.Fatal(err)
-	}
-	cookies := rec.Result().Cookies()
-	if len(cookies) < 3 {
-		t.Fatalf("long session is in %d cookies, want it split over several", len(cookies))
-	}
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	for _, c := range cookies {
-		if len(c.String()) > 4096 {
-			t.Errorf("cookie %s is %d bytes, want at most 4096", c.Name, len(c.String()))
-		}
-		req.AddCookie(c)
-	}
-	var got session
-	if !s.get(req, sessionCookie, &got) || got.IDToken != long.IDToken {
-		t.Error("long session doesn't open again")
-	}
-	if s.get(req, loginCookie, &got) {
-		t.Error("session opens as another cookie")
-	}
-
-	// A shorter value expires the chunks the longer one left.
-	rec = httptest.NewRecorder()
-	if err := s.set(rec, req, sessionCookie, "/", time.Hour, session{IDToken: "short"}); err != nil {
-		t.Fatal(err)
-	}
-	expired := 0
-	for _, c := range rec.Result().Cookies() {
-		if c.MaxAge < 0 {
-			expired++
-		}
-	}
-	if expired != len(cookies)-1 {
-		t.Errorf("shorter session expired %d cookies, want %d", expired, len(cookies)-1)
-	}
-
-	tampered := httptest.NewRequest(http.MethodGet, "/", nil)
-	for i, c := range cookies {
-		if i == 0 {
-			c.Value = "A" + c.Value[1:]
-		}
-		tampered.AddCookie(c)
-	}
-	if s.get(tampered, sessionCookie, &got) {
-		t.Error("tampered session opens")
-	}
-	other, _ := newSealer(strings.Repeat("o", 32), true)
-	if other.get(req, sessionCookie, &got) {
-		t.Error("session opens with another secret")
-	}
-}
-
 // A refresh that fails for a while keeps the session, so the next request can refresh it. One the provider refuses ends it.
 func TestRefreshFailures(t *testing.T) {
 	f := newFixture(t)
@@ -541,13 +480,13 @@ func TestLogoutWhenRevocationHangs(t *testing.T) {
 func TestRefreshKeptToken(t *testing.T) {
 	f := newFixture(t)
 	f.provider.keepRefreshToken = true
-	f.provider.ttl = time.Second
+	f.provider.ttl = 3 * time.Second
 	f.signIn(t, "/")
 	const path = "/api/kube/apis/kupra.futo.tech/v1alpha1/previews"
 	for i := range 2 {
 		if i > 0 {
 			// ID tokens expire to the second.
-			time.Sleep(2 * time.Second)
+			time.Sleep(4 * time.Second)
 		}
 		if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusOK {
 			t.Fatalf("request %d is %d, want 200", i, code)
@@ -555,5 +494,62 @@ func TestRefreshKeptToken(t *testing.T) {
 	}
 	if f.provider.refreshed != 2 {
 		t.Errorf("provider refreshed %d times, want twice", f.provider.refreshed)
+	}
+}
+
+func TestSessions(t *testing.T) {
+	hashKey, blockKey, err := cookieKeys("client-secret", "sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSessions(hashKey, blockKey, true)
+	long := session{IDToken: strings.Repeat("x", 3*chunkSize), Expiry: time.Now().Add(time.Hour).Truncate(time.Second)}
+	rec := httptest.NewRecorder()
+	if err := s.set(rec, httptest.NewRequest(http.MethodGet, "/", nil), long); err != nil {
+		t.Fatal(err)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) < 3 {
+		t.Fatalf("long session is in %d cookies, want it split over several", len(cookies))
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range cookies {
+		if len(c.String()) > 4096 {
+			t.Errorf("cookie %s is %d bytes, want at most 4096", c.Name, len(c.String()))
+		}
+		req.AddCookie(c)
+	}
+	if got, ok := s.get(req); !ok || got.IDToken != long.IDToken {
+		t.Error("long session doesn't open again")
+	}
+
+	// A shorter session expires the chunks the longer one left.
+	rec = httptest.NewRecorder()
+	if err := s.set(rec, req, session{IDToken: "short"}); err != nil {
+		t.Fatal(err)
+	}
+	expired := 0
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			expired++
+		}
+	}
+	if expired != len(cookies)-1 {
+		t.Errorf("shorter session expired %d cookies, want %d", expired, len(cookies)-1)
+	}
+
+	tampered := httptest.NewRequest(http.MethodGet, "/", nil)
+	for i, c := range cookies {
+		if i == 0 {
+			c.Value = "A" + c.Value[1:]
+		}
+		tampered.AddCookie(c)
+	}
+	if _, ok := s.get(tampered); ok {
+		t.Error("tampered session opens")
+	}
+	otherHash, otherBlock, _ := cookieKeys("rotated-secret", "sessions")
+	if _, ok := newSessions(otherHash, otherBlock, true).get(req); ok {
+		t.Error("session opens after the client secret changed")
 	}
 }

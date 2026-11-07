@@ -109,11 +109,6 @@ spec:
                 secretKeyRef:
                   name: {{ .existingSecret }}
                   key: client-secret
-            - name: COOKIE_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .existingSecret }}
-                  key: cookie-secret
           ports:
             - name: http
               containerPort: 8080
