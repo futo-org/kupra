@@ -37,6 +37,8 @@ type provider struct {
 	hangRevocation bool
 	// failures are the statuses the next refreshes fail with.
 	failures []int
+	// keepRefreshToken has refreshes return the same refresh token.
+	keepRefreshToken bool
 	// refreshToken is the one refresh token the provider accepts.
 	refreshToken string
 	revoked      []string
@@ -91,14 +93,16 @@ func newProvider(t *testing.T) *provider {
 				http.Error(w, http.StatusText(code), code)
 				return
 			}
-			// Refresh tokens rotate: each is accepted once.
+			// Refresh tokens rotate, unless keepRefreshToken is set: each is accepted once.
 			if r.Form.Get("refresh_token") != p.refreshToken {
 				invalidGrant(w)
 				return
 			}
 			p.refreshed++
 		}
-		p.refreshToken = fmt.Sprintf("refresh-%d", p.refreshed)
+		if !p.keepRefreshToken || p.refreshToken == "" {
+			p.refreshToken = fmt.Sprintf("refresh-%d", p.refreshed)
+		}
 		writeJSON(w, map[string]any{
 			"access_token":  "access",
 			"token_type":    "Bearer",
@@ -532,5 +536,26 @@ func TestLogoutWhenRevocationHangs(t *testing.T) {
 	}
 	if code, _ := f.do(t, http.MethodGet, "/api/session", nil); code != http.StatusUnauthorized {
 		t.Errorf("session after logging out is %d, want 401", code)
+	}
+}
+
+// With a provider that keeps refresh tokens, a finished refresh isn't handed out once its ID token has expired.
+func TestRefreshKeptToken(t *testing.T) {
+	f := newFixture(t)
+	f.provider.keepRefreshToken = true
+	f.provider.ttl = time.Second
+	f.signIn(t, "/")
+	const path = "/api/kube/apis/kupra.futo.tech/v1alpha1/previews"
+	for i := range 2 {
+		if i > 0 {
+			// ID tokens expire to the second.
+			time.Sleep(2 * time.Second)
+		}
+		if code, _ := f.do(t, http.MethodGet, path, nil); code != http.StatusOK {
+			t.Fatalf("request %d is %d, want 200", i, code)
+		}
+	}
+	if f.provider.refreshed != 2 {
+		t.Errorf("provider refreshed %d times, want twice", f.provider.refreshed)
 	}
 }

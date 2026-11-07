@@ -29,11 +29,11 @@ func (r *refreshes) do(refreshToken string, refresh func() (*session, error)) (*
 		r.calls = map[[sha256.Size]byte]*refreshCall{}
 	}
 	for k, c := range r.calls {
-		if !c.ended.IsZero() && time.Since(c.ended) > refreshResultLifetime {
+		if !c.ended.IsZero() && !c.usable() {
 			delete(r.calls, k)
 		}
 	}
-	if c, ok := r.calls[key]; ok {
+	if c, ok := r.calls[key]; ok && (c.ended.IsZero() || c.usable()) {
 		r.mu.Unlock()
 		<-c.done
 		return c.session, c.err
@@ -52,4 +52,9 @@ func (r *refreshes) do(refreshToken string, refresh func() (*session, error)) (*
 	r.mu.Unlock()
 	close(c.done)
 	return c.session, c.err
+}
+
+// usable reports whether a finished refresh's result can still be handed out: it's recent, and its ID token hasn't expired. Otherwise a provider that doesn't rotate refresh tokens is asked again.
+func (c *refreshCall) usable() bool {
+	return time.Since(c.ended) <= refreshResultLifetime && c.session != nil && time.Now().Before(c.session.Expiry)
 }
