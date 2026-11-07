@@ -10,3 +10,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+  - id: dashboard
+    main: ./cmd/dashboard
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w

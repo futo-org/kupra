@@ -23,7 +23,8 @@ const (
 	sessionLifetime = 30 * 24 * time.Hour
 	loginLifetime   = 10 * time.Minute
 	// refreshMargin refreshes an ID token this long before it expires, so it doesn't expire on its way to the API server.
-	refreshMargin = 30 * time.Second
+	refreshMargin  = 30 * time.Second
+	refreshTimeout = 30 * time.Second
 )
 
 // errSignedOut means a request has no usable session.
@@ -35,6 +36,8 @@ type authenticator struct {
 	verifier   *oidc.IDTokenVerifier
 	revocation string
 	sealer     *sealer
+	// refreshes shares a refresh between the requests that carry the same refresh token, as providers that rotate refresh tokens only accept each once.
+	refreshes refreshes
 	// client is used for every request to the identity provider.
 	client *http.Client
 }
@@ -151,24 +154,37 @@ func (a *authenticator) token(w http.ResponseWriter, r *http.Request) (string, e
 	if s.RefreshToken == "" {
 		return "", errSignedOut
 	}
-	ctx := a.context(r.Context())
-	token, err := a.oauth2.TokenSource(ctx, &oauth2.Token{RefreshToken: s.RefreshToken}).Token()
+	refreshed, err := a.refreshes.do(s.RefreshToken, func() (*session, error) {
+		// Other requests wait on this refresh, so it goes on if this request is cancelled.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), refreshTimeout)
+		defer cancel()
+		return a.refresh(a.context(ctx), s.RefreshToken)
+	})
 	if err != nil {
-		ctrl.LoggerFrom(ctx).Info("refreshing a session failed", "error", err.Error())
+		ctrl.LoggerFrom(r.Context()).Info("refreshing a session failed", "error", err.Error())
 		a.sealer.clear(w, r, sessionCookie, "/")
 		return "", errSignedOut
-	}
-	refreshed, err := a.session(ctx, token, "")
-	if err != nil {
-		return "", err
-	}
-	if refreshed.RefreshToken == "" {
-		refreshed.RefreshToken = s.RefreshToken
 	}
 	if err := a.sealer.set(w, r, sessionCookie, "/", sessionLifetime, refreshed); err != nil {
 		return "", err
 	}
 	return refreshed.IDToken, nil
+}
+
+// refresh exchanges a refresh token for a new session.
+func (a *authenticator) refresh(ctx context.Context, refreshToken string) (*session, error) {
+	token, err := a.oauth2.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
+	if err != nil {
+		return nil, err
+	}
+	refreshed, err := a.session(ctx, token, "")
+	if err != nil {
+		return nil, err
+	}
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = refreshToken
+	}
+	return refreshed, nil
 }
 
 // logout revokes the session's refresh token, if the provider supports it, and clears the session's cookies.

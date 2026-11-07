@@ -8,7 +8,7 @@ permissions: {}
 
 jobs:
   publish:
-    name: Publish image and chart
+    name: Publish images and chart
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,6 +37,13 @@ jobs:
         env:
           KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/kupra-operator
         run: ko build --bare --tags "${TAG#v}" --image-label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" ./cmd/operator
+
+      - name: Publish the dashboard image
+        env:
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/kupra-dashboard
+        run: |
+          mise run web:build
+          ko build --bare --tags "${TAG#v}" --image-label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" ./cmd/dashboard
 
       - name: Publish the chart
         run: |

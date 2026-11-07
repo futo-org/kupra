@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -32,7 +33,9 @@ type provider struct {
 	mu        sync.Mutex
 	nonces    map[string]string // by code
 	refreshed int
-	revoked   []string
+	// refreshToken is the one refresh token the provider accepts.
+	refreshToken string
+	revoked      []string
 }
 
 func newProvider(t *testing.T) *provider {
@@ -78,12 +81,18 @@ func newProvider(t *testing.T) *provider {
 				return
 			}
 		case "refresh_token":
+			// Refresh tokens rotate: each is accepted once.
+			if r.Form.Get("refresh_token") != p.refreshToken {
+				http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+				return
+			}
 			p.refreshed++
 		}
+		p.refreshToken = fmt.Sprintf("refresh-%d", p.refreshed)
 		writeJSON(w, map[string]any{
 			"access_token":  "access",
 			"token_type":    "Bearer",
-			"refresh_token": "refresh",
+			"refresh_token": p.refreshToken,
 			"id_token":      p.idToken(t, nonce),
 		})
 	})
@@ -280,7 +289,7 @@ func TestSignInAndProxy(t *testing.T) {
 	if code != http.StatusNoContent {
 		t.Errorf("logging out is %d, want 204", code)
 	}
-	if len(f.provider.revoked) != 1 || f.provider.revoked[0] != "refresh" {
+	if len(f.provider.revoked) != 1 || f.provider.revoked[0] != "refresh-0" {
 		t.Errorf("provider revoked %v, want the refresh token", f.provider.revoked)
 	}
 	if code, _ := f.do(t, http.MethodGet, "/api/session", nil); code != http.StatusUnauthorized {
@@ -330,11 +339,44 @@ func TestRefresh(t *testing.T) {
 	// Tokens that expire within the refresh margin are refreshed on every use.
 	f.provider.ttl = refreshMargin / 2
 	f.signIn(t, "/")
-	if code, _ := f.do(t, http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/previews", nil); code != http.StatusOK {
-		t.Fatalf("listing previews is %d, want 200", code)
+
+	// Requests sent together with the same cookies share one refresh, as the provider accepts each refresh token once.
+	var wg sync.WaitGroup
+	codes := make([]int, 10)
+	for i := range codes {
+		wg.Go(func() {
+			req, _ := http.NewRequest(http.MethodGet, f.dashboard.URL+"/api/kube/apis/kupra.futo.tech/v1alpha1/previews", nil)
+			for _, c := range f.browser.Jar.Cookies(req.URL) {
+				req.AddCookie(c)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = resp.Body.Close()
+			codes[i] = resp.StatusCode
+		})
+	}
+	wg.Wait()
+	for i, code := range codes {
+		if code != http.StatusOK {
+			t.Errorf("request %d is %d, want 200", i, code)
+		}
 	}
 	if f.provider.refreshed != 1 {
 		t.Errorf("provider refreshed %d times, want once", f.provider.refreshed)
+	}
+
+	// The browser still has the old cookies, so its next request gets the same refresh's result, and the new cookies. The one after carries the new refresh token, and refreshes again.
+	if code, _ := f.do(t, http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/previews", nil); code != http.StatusOK {
+		t.Fatalf("listing previews is %d, want 200", code)
+	}
+	if code, _ := f.do(t, http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/previews", nil); code != http.StatusOK {
+		t.Fatalf("listing previews again is %d, want 200", code)
+	}
+	if f.provider.refreshed != 2 {
+		t.Errorf("provider refreshed %d times, want twice", f.provider.refreshed)
 	}
 }
 
