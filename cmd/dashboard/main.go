@@ -49,17 +49,24 @@ func main() {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		// Requests end with the signal, so watch streams don't hold up shutting down; the browser reconnects to the next pod.
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
+	shutDown := make(chan struct{})
 	go func() {
+		defer close(shutDown)
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = server.Shutdown(shutdown)
+		if err := server.Shutdown(shutdown); err != nil {
+			log.Error(err, "shutting down")
+		}
 	}()
 	log.Info("serving", "address", addr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "serving failed")
 		os.Exit(1)
 	}
+	// Shutdown returns ListenAndServe at once, and then waits for requests to finish.
+	<-shutDown
 }

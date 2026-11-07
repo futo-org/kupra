@@ -28,6 +28,9 @@ const appNamespaces = "app-namespaces"
 // maxCollections bounds how many collections one stream may watch.
 const maxCollections = 50
 
+// heartbeatInterval is how often an idle stream sends a comment, well within proxies' usual idle timeouts of a minute or more.
+var heartbeatInterval = 30 * time.Second
+
 // watchable are the resources the page may watch, by plural.
 var watchable = map[string]bool{"previewapps": true, "previews": true, "previewsnapshots": true}
 
@@ -106,6 +109,15 @@ func (h *watchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	// The page sees the stream open before the first lists come back.
+	flush()
+	heartbeat := time.NewTicker(heartbeatInterval)
+	defer heartbeat.Stop()
 	events := make(chan event, 64)
 	for _, c := range collections {
 		var client dynamic.Interface = user
@@ -118,6 +130,12 @@ func (h *watchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			// A comment keeps proxies from closing a stream that has nothing to say.
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flush()
 		case e := <-events:
 			data, err := json.Marshal(e)
 			if err != nil {
@@ -126,9 +144,7 @@ func (h *watchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
 				return
 			}
-			if flusher != nil {
-				flusher.Flush()
-			}
+			flush()
 		}
 	}
 }

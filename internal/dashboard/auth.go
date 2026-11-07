@@ -32,6 +32,9 @@ var revokeTimeout = 10 * time.Second
 // errSignedOut means a request has no usable session.
 var errSignedOut = errors.New("signed out")
 
+// errNoIDToken means a refresh succeeded without an ID token, which the API server needs, so the user has to sign in again.
+var errNoIDToken = errors.New("identity provider refreshed the session without an ID token")
+
 // authenticator signs people in with an OIDC provider, and keeps their tokens in sealed cookies.
 type authenticator struct {
 	party    rp.RelyingParty
@@ -120,8 +123,8 @@ func (a *authenticator) session(w http.ResponseWriter, r *http.Request) (session
 		defer cancel()
 		return a.refresh(ctx, s.RefreshToken)
 	})
-	if errors.Is(err, oidc.ErrInvalidGrant()) {
-		// The provider refused the refresh token, so the session is over. Other errors, like being rate limited, may pass.
+	if errors.Is(err, oidc.ErrInvalidGrant()) || errors.Is(err, errNoIDToken) {
+		// The provider refused the refresh token, or gave no ID token, so the session is over. Other errors, like being rate limited, may pass.
 		ctrl.LoggerFrom(r.Context()).Info("provider refused to refresh a session", "error", err.Error())
 		a.sessions.clear(w, r)
 		return session{}, errSignedOut
@@ -143,7 +146,7 @@ func (a *authenticator) refresh(ctx context.Context, refreshToken string) (*sess
 		return nil, err
 	}
 	if tokens.IDToken == "" {
-		return nil, errors.New("identity provider returned no ID token")
+		return nil, errNoIDToken
 	}
 	s := &session{IDToken: tokens.IDToken, RefreshToken: tokens.RefreshToken, Expiry: tokens.IDTokenClaims.GetExpiration()}
 	if s.RefreshToken == "" {

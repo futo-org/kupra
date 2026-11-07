@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -108,21 +110,23 @@ func stream(t *testing.T, f *fixture, query string) (<-chan event, func()) {
 	return events, cancel
 }
 
-// next waits for an event of the collection and type.
-func next(t *testing.T, events <-chan event, collection, typ string) {
+// next waits for events, each given as "<collection> <type>", in any order. Other events are skipped.
+func next(t *testing.T, events <-chan event, want ...string) {
 	t.Helper()
+	missing := map[string]bool{}
+	for _, w := range want {
+		missing[w] = true
+	}
 	timeout := time.After(30 * time.Second)
-	for {
+	for len(missing) > 0 {
 		select {
 		case e, ok := <-events:
 			if !ok {
-				t.Fatalf("stream ended, want %s %s", typ, collection)
+				t.Fatalf("stream ended, still waiting for %v", slices.Sorted(maps.Keys(missing)))
 			}
-			if e.Collection == collection && e.Type == typ {
-				return
-			}
+			delete(missing, e.Collection+" "+e.Type)
 		case <-timeout:
-			t.Fatalf("no %s %s after 30s", typ, collection)
+			t.Fatalf("still waiting for %v after 30s", slices.Sorted(maps.Keys(missing)))
 		}
 	}
 }
@@ -171,10 +175,8 @@ func TestWatchAsUser(t *testing.T) {
 
 	events, stop := stream(t, f, "c=previews/readable&c=previews/forbidden&c=app-namespaces")
 	defer stop()
-	next(t, events, "previews/forbidden", "ERROR")
-	next(t, events, "app-namespaces readable", "ADDED")
-	next(t, events, "app-namespaces", "SYNCED")
-	next(t, events, "previews/readable", "SYNCED")
+	// Collections are watched side by side, so their first events come in any order.
+	next(t, events, "previews/forbidden ERROR", "app-namespaces readable ADDED", "app-namespaces SYNCED", "previews/readable SYNCED")
 
 	preview := &kuprav1alpha1.Preview{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "readable", Name: "pr-1"},
@@ -183,9 +185,9 @@ func TestWatchAsUser(t *testing.T) {
 	if err := k8s.Create(ctx, preview); err != nil {
 		t.Fatal(err)
 	}
-	next(t, events, "previews/readable pr-1", "ADDED")
+	next(t, events, "previews/readable pr-1 ADDED")
 	if err := k8s.Delete(ctx, preview); err != nil {
 		t.Fatal(err)
 	}
-	next(t, events, "previews/readable pr-1", "DELETED")
+	next(t, events, "previews/readable pr-1 DELETED")
 }

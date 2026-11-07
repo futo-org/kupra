@@ -1,9 +1,12 @@
 package dashboard
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,8 +31,10 @@ type provider struct {
 	ttl time.Duration
 
 	mu        sync.Mutex
-	nonces    map[string]string // by code
+	codes     map[string]authorization
 	refreshed int
+	// refreshWithoutIDToken has refreshes answer without an ID token.
+	refreshWithoutIDToken bool
 	// hangRevocation makes revocation never answer.
 	hangRevocation bool
 	// failures are the statuses the next refreshes fail with.
@@ -41,13 +46,18 @@ type provider struct {
 	revoked      []string
 }
 
+// authorization is what the provider keeps of an authorization request until its code is exchanged.
+type authorization struct {
+	nonce, challenge, method string
+}
+
 func newProvider(t *testing.T) *provider {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &provider{key: key, ttl: time.Hour, nonces: map[string]string{}}
+	p := &provider{key: key, ttl: time.Hour, codes: map[string]authorization{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{
@@ -67,7 +77,7 @@ func newProvider(t *testing.T) *provider {
 		q := r.URL.Query()
 		code := rand.Text()
 		p.mu.Lock()
-		p.nonces[code] = q.Get("nonce")
+		p.codes[code] = authorization{nonce: q.Get("nonce"), challenge: q.Get("code_challenge"), method: q.Get("code_challenge_method")}
 		p.mu.Unlock()
 		http.Redirect(w, r, q.Get("redirect_uri")+"?code="+code+"&state="+url.QueryEscape(q.Get("state")), http.StatusFound)
 	})
@@ -78,11 +88,14 @@ func newProvider(t *testing.T) *provider {
 		nonce := ""
 		switch r.Form.Get("grant_type") {
 		case "authorization_code":
-			var ok bool
-			if nonce, ok = p.nonces[r.Form.Get("code")]; !ok || r.Form.Get("code_verifier") == "" {
+			auth, ok := p.codes[r.Form.Get("code")]
+			// PKCE: the verifier has to hash to the challenge the authorization request carried.
+			verifier := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
+			if !ok || auth.method != "S256" || base64.RawURLEncoding.EncodeToString(verifier[:]) != auth.challenge {
 				invalidGrant(w)
 				return
 			}
+			nonce = auth.nonce
 		case "refresh_token":
 			if len(p.failures) > 0 {
 				code := p.failures[0]
@@ -100,12 +113,11 @@ func newProvider(t *testing.T) *provider {
 		if !p.keepRefreshToken || p.refreshToken == "" {
 			p.refreshToken = fmt.Sprintf("refresh-%d", p.refreshed)
 		}
-		writeJSON(w, map[string]any{
-			"access_token":  "access",
-			"token_type":    "Bearer",
-			"refresh_token": p.refreshToken,
-			"id_token":      p.idToken(t, nonce),
-		})
+		response := map[string]any{"access_token": "access", "token_type": "Bearer", "refresh_token": p.refreshToken}
+		if r.Form.Get("grant_type") != "refresh_token" || !p.refreshWithoutIDToken {
+			response["id_token"] = p.idToken(t, nonce)
+		}
+		writeJSON(w, response)
 	})
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		if p.hangRevocation {
@@ -556,4 +568,85 @@ func TestSPAWithoutPage(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "mise run web:build") {
 		t.Errorf("page without a build is %d %q, want 503 saying to run mise run web:build", rec.Code, rec.Body.String())
 	}
+}
+
+// The fake provider holds sign-in to PKCE, so the sign-in tests would catch a dashboard that sends the wrong verifier.
+func TestProviderChecksPKCE(t *testing.T) {
+	p := newProvider(t)
+	client := p.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	verifier := rand.Text() + rand.Text()
+	challenge := sha256.Sum256([]byte(verifier))
+	exchange := func(v string) int {
+		t.Helper()
+		resp, err := client.Get(p.URL + "/authorize?" + url.Values{
+			"redirect_uri":          {"https://dashboard.example.com/auth/callback"},
+			"code_challenge":        {base64.RawURLEncoding.EncodeToString(challenge[:])},
+			"code_challenge_method": {"S256"},
+		}.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		location, _ := url.Parse(resp.Header.Get("Location"))
+		resp, err = client.PostForm(p.URL+"/token", url.Values{
+			"grant_type": {"authorization_code"}, "code": {location.Query().Get("code")}, "code_verifier": {v},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := exchange("wrong" + verifier); code != http.StatusBadRequest {
+		t.Errorf("exchanging a code with the wrong verifier is %d, want 400", code)
+	}
+	if code := exchange(verifier); code != http.StatusOK {
+		t.Errorf("exchanging a code with its verifier is %d, want 200", code)
+	}
+}
+
+// A refresh that succeeds without an ID token, which the API server needs, ends the session, whether or not the refresh token rotated.
+func TestRefreshWithoutIDToken(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		t.Run(fmt.Sprintf("keep refresh token %t", keep), func(t *testing.T) {
+			f := newFixture(t)
+			f.provider.ttl = refreshMargin / 2
+			f.provider.keepRefreshToken = keep
+			f.signIn(t, "/")
+			f.provider.mu.Lock()
+			f.provider.refreshWithoutIDToken = true
+			f.provider.mu.Unlock()
+			if code, _ := f.do(t, http.MethodGet, "/api/kube/apis/kupra.futo.tech/v1alpha1/previews", nil); code != http.StatusUnauthorized {
+				t.Errorf("request is %d, want 401", code)
+			}
+			if code, _ := f.do(t, http.MethodGet, "/api/session", nil); code != http.StatusUnauthorized {
+				t.Errorf("session afterwards is %d, want 401", code)
+			}
+		})
+	}
+}
+
+// An idle stream sends keepalive comments, so proxies don't close it and make the page list everything again.
+func TestWatchKeepsAlive(t *testing.T) {
+	interval := heartbeatInterval
+	heartbeatInterval = 50 * time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = interval })
+	f := newFixture(t)
+	f.signIn(t, "/")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, f.dashboard.URL+"/api/watch?c=app-namespaces", nil)
+	resp, err := f.browser.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	lines := bufio.NewScanner(resp.Body)
+	for lines.Scan() {
+		if lines.Text() == ": keepalive" {
+			return
+		}
+	}
+	t.Errorf("stream ended without a keepalive: %v", lines.Err())
 }
