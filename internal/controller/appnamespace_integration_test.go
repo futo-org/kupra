@@ -4,10 +4,13 @@ package controller_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
@@ -24,8 +27,12 @@ func TestNamespacesWithAppsAreLabelled(t *testing.T) {
 			if err := k8s.Get(ctx, client.ObjectKey{Name: "with-apps"}, &ns); err != nil {
 				return err
 			}
-			if _, got := ns.Labels[kuprav1alpha1.LabelAppNamespace]; got != want {
+			value, got := ns.Labels[kuprav1alpha1.LabelAppNamespace]
+			switch {
+			case got != want:
 				return fmt.Errorf("namespace labelled %s is %t, want %t", kuprav1alpha1.LabelAppNamespace, got, want)
+			case value != "":
+				return fmt.Errorf("namespace's %s label is %q, want it empty", kuprav1alpha1.LabelAppNamespace, value)
 			}
 			if ns.Labels["team"] != "a" {
 				return fmt.Errorf("namespace's team label is %q, want it kept as a", ns.Labels["team"])
@@ -39,12 +46,31 @@ func TestNamespacesWithAppsAreLabelled(t *testing.T) {
 	second := createApp(t, "with-apps", "second", "template: {resources: []}")
 	labelled(true)
 
+	// A label with a value is put back to the empty one.
+	setLabel(t, "with-apps", "stale")
+	labelled(true)
+
+	// One app is enough to keep the label: removed while there is one, it comes back.
 	if err := k8s.Delete(ctx, first); err != nil {
 		t.Fatal(err)
 	}
+	setLabel(t, "with-apps", nil)
 	labelled(true)
 	if err := k8s.Delete(ctx, second); err != nil {
 		t.Fatal(err)
 	}
 	labelled(false)
+}
+
+// setLabel sets a namespace's app-namespace label to value, or removes it when value is nil, as another field manager.
+func setLabel(t *testing.T, name string, value any) {
+	t.Helper()
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": map[string]any{kuprav1alpha1.LabelAppNamespace: value}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if err := k8s.Patch(context.Background(), ns, client.RawPatch(types.MergePatchType, patch), client.FieldOwner("test")); err != nil {
+		t.Fatal(err)
+	}
 }
