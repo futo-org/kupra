@@ -3,5 +3,5 @@
 set -euo pipefail
 
 export KUBECONFIG="$PWD/.e2e/kubeconfig"
-# Temporary, to reproduce a flake: TestClusterState alone, repeatedly.
-go test -tags e2e -count 4 -failfast -run TestClusterState -timeout 45m ./test/e2e/...
+# Temporary, to reproduce a flake: TestClusterState alone, repeatedly, with the in-process operator's log (-v).
+go test -tags e2e -v -count 4 -failfast -run TestClusterState -timeout 45m ./test/e2e/...

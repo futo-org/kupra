@@ -22,8 +22,7 @@ for ns in $(k get namespaces -o name | grep -E "/e2e-"); do
   done
 done
 
-# kupra's own log, for what it did to the namespaces it manages.
-k -n kupra-system logs deployment/kupra-operator --tail=-1 | tail -300
+| tail -300
 # For each namespace stuck deleting: the namespace, everything still in it with its creation and write times, and every log line about it.
 for ns in $(k get namespaces -o jsonpath='{range .items[?(@.metadata.deletionTimestamp)]}{.metadata.name}{"\n"}{end}'); do
   echo "=== namespace $ns, stuck deleting"
