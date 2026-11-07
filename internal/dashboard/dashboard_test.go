@@ -20,8 +20,6 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"k8s.io/client-go/rest"
-
-	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
 
 // provider is a fake OIDC provider. It signs anyone in as alice, with ID tokens that last ttl.
@@ -122,7 +120,8 @@ func newProvider(t *testing.T) *provider {
 		p.revoked = append(p.revoked, r.Form.Get("token"))
 		p.mu.Unlock()
 	})
-	p.Server = httptest.NewServer(mux)
+	// TLS, as the API server only trusts issuers over https.
+	p.Server = httptest.NewTLSServer(mux)
 	t.Cleanup(p.Close)
 	return p
 }
@@ -197,7 +196,16 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{provider: newProvider(t), api: newAPIServer(t)}
+	api := newAPIServer(t)
+	f := newFixtureWith(t, newProvider(t), &rest.Config{Host: api.URL, BearerToken: "dashboard-token"})
+	f.api = api
+	return f
+}
+
+// newFixtureWith serves a dashboard that signs in with p, and reaches the API server with cfg as its own account.
+func newFixtureWith(t *testing.T, p *provider, cfg *rest.Config) *fixture {
+	t.Helper()
+	f := &fixture{provider: p}
 	static := t.TempDir()
 	if err := os.WriteFile(filepath.Join(static, "index.html"), []byte("<p>kupra</p>"), 0o600); err != nil {
 		t.Fatal(err)
@@ -212,14 +220,15 @@ func newFixture(t *testing.T) *fixture {
 		ClientID:     "kupra",
 		ClientSecret: "secret",
 		Scopes:       []string{"openid", "offline_access"},
-		Config:       &rest.Config{Host: f.api.URL, BearerToken: "dashboard-token"},
+		Config:       cfg,
+		HTTPClient:   p.Client(),
 		StaticDir:    static,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	jar, _ := cookiejar.New(nil)
-	f.browser = &http.Client{Jar: jar}
+	f.browser = &http.Client{Jar: jar, Transport: p.Client().Transport}
 	return f
 }
 
@@ -289,15 +298,6 @@ func TestSignInAndProxy(t *testing.T) {
 		if v := got.Header.Get(h); v != "" {
 			t.Errorf("API server got %s %q, want none", h, v)
 		}
-	}
-
-	code, body = f.do(t, http.MethodGet, "/api/app-namespaces", nil)
-	if code != http.StatusOK || body != `{"namespaces":["immich"]}`+"\n" {
-		t.Errorf("app namespaces are %d %s, want immich", code, body)
-	}
-	got = f.api.last()
-	if got.URL.Query().Get("labelSelector") != kuprav1alpha1.LabelAppNamespace || got.Header.Get("Authorization") != "Bearer dashboard-token" {
-		t.Errorf("namespaces were listed with selector %q and Authorization %q, want %s with the dashboard's own token", got.URL.Query().Get("labelSelector"), got.Header.Get("Authorization"), kuprav1alpha1.LabelAppNamespace)
 	}
 
 	code, _ = f.do(t, http.MethodPost, "/auth/logout", nil)

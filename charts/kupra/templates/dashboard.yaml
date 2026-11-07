@@ -8,7 +8,7 @@ metadata:
   labels:
     {{- include "kupra.dashboard.labels" $ | nindent 4 }}
 ---
-# The dashboard's only permission of its own: finding the namespaces with apps. Everything else it does as its users (ADR 7).
+# The dashboard's only permission of its own: finding and watching the namespaces with apps. Everything else it does as its users (ADR 7).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -18,7 +18,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [namespaces]
-    verbs: [list]
+    verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

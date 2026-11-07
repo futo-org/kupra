@@ -98,15 +98,21 @@ func (a *authenticator) callback(w http.ResponseWriter, r *http.Request) {
 
 // token returns the request's ID token, refreshing it if it's about to expire.
 func (a *authenticator) token(w http.ResponseWriter, r *http.Request) (string, error) {
+	s, err := a.session(w, r)
+	return s.IDToken, err
+}
+
+// session returns the request's session, refreshing it if its ID token is about to expire.
+func (a *authenticator) session(w http.ResponseWriter, r *http.Request) (session, error) {
 	s, ok := a.sessions.get(r)
 	if !ok {
-		return "", errSignedOut
+		return session{}, errSignedOut
 	}
 	if time.Until(s.Expiry) > refreshMargin {
-		return s.IDToken, nil
+		return s, nil
 	}
 	if s.RefreshToken == "" {
-		return "", errSignedOut
+		return session{}, errSignedOut
 	}
 	refreshed, err := a.refreshes.do(s.RefreshToken, func() (*session, error) {
 		// Other requests wait on this refresh, so it goes on if this request is cancelled.
@@ -118,16 +124,16 @@ func (a *authenticator) token(w http.ResponseWriter, r *http.Request) (string, e
 		// The provider refused the refresh token, so the session is over. Other errors, like being rate limited, may pass.
 		ctrl.LoggerFrom(r.Context()).Info("provider refused to refresh a session", "error", err.Error())
 		a.sessions.clear(w, r)
-		return "", errSignedOut
+		return session{}, errSignedOut
 	}
 	if err != nil {
 		// Otherwise the session is kept, so a later request can try again.
-		return "", fmt.Errorf("refreshing the session: %w", err)
+		return session{}, fmt.Errorf("refreshing the session: %w", err)
 	}
 	if err := a.sessions.set(w, r, *refreshed); err != nil {
-		return "", err
+		return session{}, err
 	}
-	return refreshed.IDToken, nil
+	return *refreshed, nil
 }
 
 // refresh exchanges a refresh token for a new session.
