@@ -21,6 +21,20 @@ for ns in $(k get namespaces -o name | grep -E "/e2e-"); do
     k -n "$ns" logs "$pod" --all-containers --tail=50
   done
 done
+
+# For each namespace stuck deleting: the namespace, everything still in it with its creation and write times, and every log line about it.
+for ns in $(k get namespaces -o jsonpath='{range .items[?(@.metadata.deletionTimestamp)]}{.metadata.name}{"\n"}{end}'); do
+  echo "=== namespace $ns, stuck deleting"
+  k get namespace "$ns" -o yaml
+  for resource in $(k api-resources --namespaced --verbs=list -o name); do
+    k -n "$ns" get "$resource" --ignore-not-found --show-managed-fields \
+      -o custom-columns=KIND:.kind,NAME:.metadata.name,UID:.metadata.uid,CREATED:.metadata.creationTimestamp,DELETING:.metadata.deletionTimestamp,FINALIZERS:.metadata.finalizers,WRITES:.metadata.managedFields[*].time,BY:.metadata.managedFields[*].manager | tail -n +2
+  done
+  k -n kube-system logs -l component=kube-controller-manager --tail=-1 | grep -F "$ns"
+  k -n kube-system logs -l component=kube-apiserver --tail=-1 | grep -F "$ns" | tail -50
+  k -n cnpg-system logs deployment/cnpg-controller-manager --tail=-1 | grep -F "$ns" | tail -100
+done
+
 echo "=== kupra-system/kupra-dashboard"
 k -n kupra-system logs deployment/kupra-dashboard --all-containers --tail=-1
 echo "=== dex/dex"
