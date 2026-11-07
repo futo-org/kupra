@@ -10,9 +10,11 @@ const { list } = store;
 /** AppGroup is a namespace's apps. */
 export type AppGroup = { namespace: string; apps: PreviewApp[] };
 
-/** appGroups returns the apps the user can see, by namespace. */
+/** appGroups returns the apps the user can see, by namespace, leaving out namespaces where they can see none. */
 export const appGroups = (): AppGroup[] =>
-  namespaces().map((namespace) => ({ namespace, apps: list('previewapps', namespace) }));
+  namespaces()
+    .map((namespace) => ({ namespace, apps: list('previewapps', namespace) }))
+    .filter(({ apps }) => apps.length > 0);
 
 /** namespaces returns the namespaces that contain apps. */
 export const namespaces = () =>
