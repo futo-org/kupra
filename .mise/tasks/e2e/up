@@ -230,7 +230,7 @@ for _ in $(seq 60); do
 done
 whoami | grep '"oidc:creator@example.com"' >/dev/null
 
-# The dashboard trusts Dex's CA, and uses the node's network to reach Dex at the issuer URL.
+# The dashboard trusts Dex's CA through the chart's dashboard.oidc.caConfigMap.
 k create namespace kupra-system --dry-run=client -o yaml | k apply --server-side -f -
 k -n kupra-system create secret generic kupra-dashboard --from-literal=client-secret="$client_secret" \
   --dry-run=client -o yaml | k apply --server-side -f -
@@ -246,28 +246,12 @@ helm upgrade --install kupra charts/kupra --kube-context "$context" --namespace 
   --set operator.image.pullPolicy=Never \
   --set dashboard.enabled=true --set dashboard.publicURL="$dashboard_url" \
   --set dashboard.oidc.issuerURL="$issuer" --set dashboard.oidc.clientID=kupra \
-  --set dashboard.existingSecret=kupra-dashboard \
+  --set dashboard.existingSecret=kupra-dashboard --set dashboard.oidc.caConfigMap=dex-ca \
   --set dashboard.image.repository="${dashboard_image%:*}" --set dashboard.image.tag="${dashboard_image##*:}" \
   --set dashboard.image.pullPolicy=Never
-k -n kupra-system patch deployment/kupra-dashboard -p '
-spec:
-  template:
-    spec:
-      hostNetwork: true
-      containers:
-        - name: dashboard
-          env:
-            - name: SSL_CERT_FILE
-              value: /etc/dex-ca/ca.crt
-          volumeMounts:
-            - name: dex-ca
-              mountPath: /etc/dex-ca
-              readOnly: true
-      volumes:
-        - name: dex-ca
-          configMap:
-            name: dex-ca
-'
+# Only in this cluster does the issuer URL point at localhost, which the dashboard reaches on the node's network. Real installs
+# reach their provider by its public name, so the chart has no setting for this.
+k -n kupra-system patch deployment/kupra-dashboard -p '{"spec":{"template":{"spec":{"hostNetwork":true}}}}'
 k -n kupra-system rollout status deployment/kupra-operator --timeout=180s
 k -n kupra-system rollout status deployment/kupra-dashboard --timeout=180s
 wait "$build_tests"
