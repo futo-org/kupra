@@ -180,6 +180,6 @@ func TestAccessToReplacedNamespace(t *testing.T) {
 	}
 	var binding rbacv1.RoleBinding
 	if err := k8s.Get(ctx, client.ObjectKey{Namespace: name, Name: "kupra-access"}, &binding); !apierrors.IsNotFound(err) {
-		t.Errorf("kupra-access in the replacement namespace: %v, %+v; want none", err, binding.Subjects)
+		t.Errorf("kupra-access in the replacement namespace: %v; want none", err)
 	}
 }

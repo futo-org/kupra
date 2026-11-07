@@ -27,6 +27,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/names"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 func TestSameObject(t *testing.T) {
@@ -78,10 +79,10 @@ func TestStallAfterTimeout(t *testing.T) {
 
 			c := apimeta.FindStatusCondition(p.Status.Conditions, meta.StalledCondition)
 			if stalled := c != nil && c.Status == metav1.ConditionTrue; stalled != tc.stalled {
-				t.Fatalf("Stalled = %+v, want stalled %v", c, tc.stalled)
+				t.Fatalf("Stalled is %s, want stalled %v", testutil.Condition(c), tc.stalled)
 			}
 			if tc.stalled && (c.Reason != ReasonTimeout || !strings.Contains(c.Message, "waiting for Deployment web")) {
-				t.Errorf("Stalled = %+v, want reason %s and the readiness message", c, ReasonTimeout)
+				t.Errorf("Stalled is %s, want reason %s and the readiness message", testutil.Condition(c), ReasonTimeout)
 			}
 			if !apimeta.IsStatusConditionTrue(p.Status.Conditions, meta.ReconcilingCondition) {
 				t.Error("Reconciling isn't True any more, but kupra keeps trying after the timeout")
@@ -105,7 +106,7 @@ func TestOwnerSubjects(t *testing.T) {
 		{Kind: rbacv1.ServiceAccountKind, Namespace: "ci", Name: "deployer"},
 	}
 	if got := ownerSubjects(p); !slices.Equal(got, want) {
-		t.Errorf("ownerSubjects = %+v, want %+v", got, want)
+		t.Errorf("ownerSubjects = %v, want %v", got, want)
 	}
 }
 
@@ -326,10 +327,10 @@ func TestWaitingFor(t *testing.T) {
 	running(p)
 	waitingFor(p, ReasonAppNotReady, "waiting for PreviewApp app to be checked")
 	if p.Status.Phase != kuprav1alpha1.PreviewRunning || !conditions.IsTrue(p, meta.ReadyCondition) {
-		t.Errorf("phase %s, Ready %v; want a running preview left running", p.Status.Phase, conditions.Get(p, meta.ReadyCondition))
+		t.Errorf("phase %s, Ready %s; want a running preview left running", p.Status.Phase, testutil.Condition(conditions.Get(p, meta.ReadyCondition)))
 	}
 	if !conditions.IsTrue(p, meta.ReconcilingCondition) || conditions.Has(p, meta.StalledCondition) {
-		t.Errorf("conditions = %+v, want Reconciling and not Stalled", p.Status.Conditions)
+		t.Errorf("conditions are %s, want Reconciling and not Stalled", testutil.Conditions(p.Status.Conditions))
 	}
 
 	// A new preview, and one that was blocked or had failed, is pending for the wait's reason, and no longer stalled.
@@ -343,10 +344,10 @@ func TestWaitingFor(t *testing.T) {
 		waitingFor(p, ReasonSnapshotNotReady, "PreviewSnapshot base is not ready")
 		ready := conditions.Get(p, meta.ReadyCondition)
 		if p.Status.Phase != kuprav1alpha1.PreviewPending || ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != ReasonSnapshotNotReady {
-			t.Errorf("%s: phase %s, Ready %+v; want pending, not ready for the snapshot", name, p.Status.Phase, ready)
+			t.Errorf("%s: phase %s, Ready %s; want pending, not ready for the snapshot", name, p.Status.Phase, testutil.Condition(ready))
 		}
 		if !conditions.IsTrue(p, meta.ReconcilingCondition) || conditions.Has(p, meta.StalledCondition) {
-			t.Errorf("%s: conditions %+v; want Reconciling and not Stalled", name, p.Status.Conditions)
+			t.Errorf("%s: conditions are %s, want Reconciling and not Stalled", name, testutil.Conditions(p.Status.Conditions))
 		}
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 // clusterAppSpec writes its value parameter to an empty database, and is ready while the database holds its expect parameter. The app uses the cluster's image for psql, which the node has already pulled.
@@ -119,7 +120,7 @@ func TestClusterState(t *testing.T) {
 	}
 	waitForSnapshot(t, snap)
 	if len(snap.Status.Captures) != 1 || len(snap.Status.Captures[0].Data) != 2 {
-		t.Errorf("captures = %+v, want the cluster's data and WAL", snap.Status.Captures)
+		t.Errorf("PreviewSnapshot captured %s, want the cluster, in its data and WAL", testutil.Captures(snap.Status.Captures))
 	}
 
 	// The capture outlives its source.
@@ -129,7 +130,7 @@ func TestClusterState(t *testing.T) {
 	eventually(t, 5*time.Minute, func() error {
 		var p kuprav1alpha1.Preview
 		if err := k8s.Get(ctx, client.ObjectKeyFromObject(source), &p); !apierrors.IsNotFound(err) {
-			return fmt.Errorf("Preview source still exists (%v): %s, Ready %+v", err, p.Status.Phase, apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition))
+			return fmt.Errorf("Preview source still exists (%v): %s, Ready %s", err, p.Status.Phase, testutil.Condition(apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)))
 		}
 		return nil
 	})

@@ -22,6 +22,7 @@ import (
 	"github.com/futo-org/kupra/internal/controller"
 	"github.com/futo-org/kupra/internal/names"
 	"github.com/futo-org/kupra/internal/policy"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 func getPreview(t *testing.T, namespace, name string) *kuprav1alpha1.Preview {
@@ -41,8 +42,11 @@ func waitForPhase(t *testing.T, namespace, name string, phase kuprav1alpha1.Prev
 			return err
 		}
 		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
-		if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != phase || c == nil || c.Reason != reason {
-			return fmt.Errorf("Preview %s: phase %s, Ready %+v; want %s with reason %s", name, p.Status.Phase, c, phase, reason)
+		switch {
+		case p.Status.ObservedGeneration != p.Generation:
+			return fmt.Errorf("Preview %s's status is for generation %d, want %d", name, p.Status.ObservedGeneration, p.Generation)
+		case p.Status.Phase != phase || c == nil || c.Reason != reason:
+			return fmt.Errorf("Preview %s is %s, Ready %s; want %s (%s)", name, p.Status.Phase, testutil.Condition(c), phase, reason)
 		}
 		return nil
 	})
@@ -174,7 +178,7 @@ template:
 		t.Fatal(err)
 	}
 	if binding.RoleRef.Name != "kupra-preview-template-base" || len(binding.Subjects) != 1 || binding.Subjects[0].Namespace != kupraNamespace || binding.Subjects[0].Name != nsName {
-		t.Errorf("template binding = %+v", binding)
+		t.Errorf("template binding binds ClusterRole %s to %s, want kupra-preview-template-base to ServiceAccount %s/%s", binding.RoleRef.Name, testutil.Subjects(binding.Subjects), kupraNamespace, nsName)
 	}
 	var account corev1.ServiceAccount
 	if err := k8s.Get(ctx, client.ObjectKey{Namespace: kupraNamespace, Name: nsName}, &account); err != nil {
@@ -222,7 +226,7 @@ template:
 			}
 		}
 		if len(p.Status.Inventory) != 2 || !slices.Equal(retained, []string{"data"}) {
-			t.Errorf("inventory = %+v, want the ConfigMap and the claim data, which is kept as state", p.Status.Inventory)
+			t.Errorf("inventory is %s, want the ConfigMap and the claim data, which is kept as state", testutil.Inventory(p.Status.Inventory))
 		}
 		var cache corev1.PersistentVolumeClaim
 		if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "cache"}, &cache); !apierrors.IsNotFound(err) && cache.DeletionTimestamp.IsZero() {
@@ -322,7 +326,7 @@ template:
 		waitForPhase(t, "previews", "pr-1", kuprav1alpha1.PreviewPending, "ClusterRoleNotFound")
 		var binding rbacv1.RoleBinding
 		if err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "kupra-template"}, &binding); err != nil || binding.RoleRef.Name != "kupra-preview-template-base" {
-			t.Errorf("template binding = %+v, %v; want it left bound to the old role", binding.RoleRef, err)
+			t.Errorf("template binding binds ClusterRole %s (%v), want it left bound to the old role", binding.RoleRef.Name, err)
 		}
 		setRole(nil)
 		waitForPhase(t, "previews", "pr-1", kuprav1alpha1.PreviewRunning, "Succeeded")
@@ -402,7 +406,7 @@ template:
 		}
 		p := waitForPhase(t, "previews", "rejected", kuprav1alpha1.PreviewFailed, "ApplyFailed")
 		if c := apimeta.FindStatusCondition(p.Status.Conditions, meta.StalledCondition); c == nil || c.Status != metav1.ConditionTrue {
-			t.Errorf("Stalled = %+v, want True straight away", c)
+			t.Errorf("Stalled is %s, want True straight away", testutil.Condition(c))
 		}
 	})
 
@@ -510,10 +514,10 @@ template:
 		c := apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)
 		// The refusal comes from the real apply, after the dry run passed.
 		if c == nil || c.Reason != controller.ReasonApplyFailed || !strings.Contains(c.Message, "refused") || !strings.Contains(c.Message, "apply failed") || strings.Contains(c.Message, "dry-run") {
-			return fmt.Errorf("Ready = %+v, want the real apply refused", c)
+			return fmt.Errorf("Ready is %s, want the real apply refused", testutil.Condition(c))
 		}
 		if !slices.ContainsFunc(p.Status.Inventory, func(e kuprav1alpha1.InventoryEntry) bool { return e.Name == "accepted" }) {
-			return fmt.Errorf("inventory = %+v, want ConfigMap accepted", p.Status.Inventory)
+			return fmt.Errorf("inventory is %s, want ConfigMap accepted", testutil.Inventory(p.Status.Inventory))
 		}
 		return nil
 	})

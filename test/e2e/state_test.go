@@ -18,6 +18,7 @@ import (
 
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 	"github.com/futo-org/kupra/internal/controller"
+	"github.com/futo-org/kupra/internal/testutil"
 )
 
 // stateAppSpec writes its value parameter to an empty claim, and is ready while the claim holds its expect parameter.
@@ -80,8 +81,11 @@ func waitForRunning(t *testing.T, namespace, name string) *kuprav1alpha1.Preview
 		if err := k8s.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
 			return err
 		}
-		if p.Status.ObservedGeneration != p.Generation || p.Status.Phase != kuprav1alpha1.PreviewRunning {
-			return fmt.Errorf("Preview %s is %s, Ready %+v", name, p.Status.Phase, apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition))
+		switch {
+		case p.Status.ObservedGeneration != p.Generation:
+			return fmt.Errorf("Preview %s's status is for generation %d, want %d", name, p.Status.ObservedGeneration, p.Generation)
+		case p.Status.Phase != kuprav1alpha1.PreviewRunning:
+			return fmt.Errorf("Preview %s is %s, Ready %s", name, p.Status.Phase, testutil.Condition(apimeta.FindStatusCondition(p.Status.Conditions, meta.ReadyCondition)))
 		}
 		return nil
 	})
@@ -96,7 +100,7 @@ func waitForSnapshot(t *testing.T, snap *kuprav1alpha1.PreviewSnapshot) {
 			return err
 		}
 		if !snap.Status.ReadyToUse {
-			return fmt.Errorf("PreviewSnapshot is %s, Ready %+v", snap.Status.Phase, apimeta.FindStatusCondition(snap.Status.Conditions, meta.ReadyCondition))
+			return fmt.Errorf("PreviewSnapshot is %s, Ready %s", snap.Status.Phase, testutil.Condition(apimeta.FindStatusCondition(snap.Status.Conditions, meta.ReadyCondition)))
 		}
 		return nil
 	})
