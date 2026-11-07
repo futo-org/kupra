@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Create the end-to-end test cluster"
+#MISE depends=["web:build"]
 set -euo pipefail
 
 cluster=kupra-e2e
@@ -9,18 +10,171 @@ mkdir -p "$workdir"
 export KUBECONFIG="$workdir/kubeconfig"
 k() { kubectl --context "$context" "$@"; }
 
+# Dex signs people in to the dashboard. The API server, the dashboard and the browser all reach it at the same issuer URL:
+# Dex and the dashboard use the node's network, and the node's ports are mapped to the host's.
+dex_port=5556
+issuer="https://localhost:$dex_port"
+dashboard_url=http://localhost:8090
+client_secret=e2e-client-secret
+auth="$workdir/auth"
+if [ ! -f "$auth/dex.crt" ]; then
+  mkdir -p "$auth"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj /CN=kupra-e2e-ca \
+    -keyout "$auth/ca.key" -out "$auth/ca.crt" 2>/dev/null
+  openssl req -newkey rsa:2048 -nodes -subj /CN=localhost -keyout "$auth/dex.key" -out "$auth/dex.csr" 2>/dev/null
+  openssl x509 -req -days 365 -in "$auth/dex.csr" -CA "$auth/ca.crt" -CAkey "$auth/ca.key" -CAcreateserial \
+    -extfile <(echo subjectAltName=DNS:localhost,IP:127.0.0.1) -out "$auth/dex.crt" 2>/dev/null
+fi
+cat >"$auth/authentication.yaml" <<YAML
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthenticationConfiguration
+jwt:
+  - issuer:
+      url: $issuer
+      audiences: [kupra]
+      certificateAuthority: |
+$(sed 's/^/        /' "$auth/ca.crt")
+    claimMappings:
+      username:
+        claim: email
+        prefix: "oidc:"
+      groups:
+        claim: groups
+        prefix: "oidc:"
+YAML
+
 if ! kind get clusters | grep -qx "$cluster"; then
-  kind create cluster --name "$cluster" --wait 120s
+  kind create cluster --name "$cluster" --wait 120s --config - <<YAML
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: $PWD/$auth
+        containerPath: /etc/kupra-e2e
+        readOnly: true
+    extraPortMappings:
+      - containerPort: $dex_port
+        hostPort: $dex_port
+        listenAddress: 127.0.0.1
+      - containerPort: 8080
+        hostPort: ${dashboard_url##*:}
+        listenAddress: 127.0.0.1
+kubeadmConfigPatchesJSON6902:
+  - group: kubeadm.k8s.io
+    version: v1beta4
+    kind: ClusterConfiguration
+    patch: |
+      - op: add
+        path: /apiServer/extraArgs/-
+        value:
+          name: authentication-config
+          value: /etc/kupra-e2e/authentication.yaml
+      - op: add
+        path: /apiServer/extraVolumes
+        value:
+          - name: kupra-e2e
+            hostPath: /etc/kupra-e2e
+            mountPath: /etc/kupra-e2e
+            readOnly: true
+            pathType: Directory
+YAML
 fi
 kind export kubeconfig --name "$cluster"
 
-# The operator's image and the test binary build while the cluster is set up. The image only needs the cluster to be loaded into.
+# The images, the test binary and the browser build while the cluster is set up. The images only need the cluster to be loaded into.
 arch="$(go env GOARCH)"
 (KO_DOCKER_REPO=kind.local/kupra-operator KIND_CLUSTER_NAME="$cluster" \
   ko build --bare --platform "linux/$arch" ./cmd/operator >"$workdir/image") &
 build_image=$!
+(KO_DOCKER_REPO=kind.local/kupra-dashboard KIND_CLUSTER_NAME="$cluster" \
+  ko build --bare --platform "linux/$arch" ./cmd/dashboard >"$workdir/dashboard-image") &
+build_dashboard=$!
 go test -tags e2e -c -o /dev/null ./test/e2e &
 build_tests=$!
+pnpm --dir web exec playwright install --only-shell chromium &
+install_browser=$!
+
+k create namespace dex --dry-run=client -o yaml | k apply --server-side -f -
+k -n dex create secret tls dex-tls --cert "$auth/dex.crt" --key "$auth/dex.key" --dry-run=client -o yaml |
+  k apply --server-side -f -
+k -n dex apply --server-side -f - <<YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+data:
+  config.yaml: |
+    issuer: $issuer
+    storage:
+      type: memory
+    web:
+      https: 0.0.0.0:$dex_port
+      tlsCert: /etc/dex/tls/tls.crt
+      tlsKey: /etc/dex/tls/tls.key
+    oauth2:
+      skipApprovalScreen: true
+      # Lets e2e:up check that the API server accepts Dex's tokens without a browser.
+      passwordConnector: local
+    staticClients:
+      - id: kupra
+        name: kupra
+        secret: $client_secret
+        redirectURIs: [$dashboard_url/auth/callback]
+    enablePasswordDB: true
+    # The password of each user is "password".
+    staticPasswords:
+      - email: creator@example.com
+        username: creator
+        userID: 6f0c5c4e-1d8b-4a53-9a43-2d1f0e6b7c01
+        hash: \$2a\$10\$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W
+      - email: viewer@example.com
+        username: viewer
+        userID: 6f0c5c4e-1d8b-4a53-9a43-2d1f0e6b7c02
+        hash: \$2a\$10\$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      hostNetwork: true
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:$E2E_DEX_VERSION
+          args: [dex, serve, /etc/dex/config/config.yaml]
+          ports:
+            - name: https
+              containerPort: $dex_port
+          readinessProbe:
+            httpGet:
+              path: /.well-known/openid-configuration
+              port: https
+              scheme: HTTPS
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/config
+            - name: tls
+              mountPath: /etc/dex/tls
+      volumes:
+        - name: config
+          configMap:
+            name: dex
+        - name: tls
+          secret:
+            secretName: dex-tls
+YAML
 
 snapshotter="$workdir/external-snapshotter-$E2E_SNAPSHOTTER_VERSION"
 if [ ! -d "$snapshotter" ]; then
@@ -51,14 +205,67 @@ k annotate volumesnapshotclass csi-hostpath-snapclass snapshot.storage.kubernete
 k -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
 k wait --for condition=Established --timeout=60s -f charts/kupra/crds
 
-wait "$build_image"
-image="$(cat "$workdir/image")"
-helm upgrade --install kupra charts/kupra --kube-context "$context" \
-  --namespace kupra-system --create-namespace --wait --timeout 180s \
-  --set operator.image.repository="${image%:*}" --set operator.image.tag="${image##*:}" \
-  --set operator.image.pullPolicy=Never
-wait "$build_tests"
+# Until the API server has fetched Dex's keys, it rejects Dex's tokens.
+k -n dex rollout status deployment/dex --timeout=180s
+server="$(k config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+whoami() {
+  local token
+  token="$(curl -fsS --cacert "$auth/ca.crt" -u "kupra:$client_secret" -d grant_type=password -d scope='openid email' \
+    -d username=creator@example.com -d password=password "$issuer/token" | sed -E 's/.*"id_token":"([^"]+)".*/\1/')"
+  curl -fsS -k -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+    -d '{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}' \
+    "$server/apis/authentication.k8s.io/v1/selfsubjectreviews"
+}
+for _ in $(seq 60); do
+  if whoami 2>/dev/null | grep -q '"oidc:creator@example.com"'; then
+    break
+  fi
+  sleep 2
+done
+whoami | grep '"oidc:creator@example.com"' >/dev/null
 
+# The dashboard trusts Dex's CA, and uses the node's network to reach Dex at the issuer URL.
+k create namespace kupra-system --dry-run=client -o yaml | k apply --server-side -f -
+k -n kupra-system create secret generic kupra-dashboard --from-literal=client-secret="$client_secret" \
+  --dry-run=client -o yaml | k apply --server-side -f -
+k -n kupra-system create configmap dex-ca --from-file=ca.crt="$auth/ca.crt" --dry-run=client -o yaml |
+  k apply --server-side -f -
+
+wait "$build_image"
+wait "$build_dashboard"
+image="$(cat "$workdir/image")"
+dashboard_image="$(cat "$workdir/dashboard-image")"
+helm upgrade --install kupra charts/kupra --kube-context "$context" --namespace kupra-system \
+  --set operator.image.repository="${image%:*}" --set operator.image.tag="${image##*:}" \
+  --set operator.image.pullPolicy=Never \
+  --set dashboard.enabled=true --set dashboard.publicURL="$dashboard_url" \
+  --set dashboard.oidc.issuerURL="$issuer" --set dashboard.oidc.clientID=kupra \
+  --set dashboard.existingSecret=kupra-dashboard \
+  --set dashboard.image.repository="${dashboard_image%:*}" --set dashboard.image.tag="${dashboard_image##*:}" \
+  --set dashboard.image.pullPolicy=Never
+k -n kupra-system patch deployment/kupra-dashboard -p '
+spec:
+  template:
+    spec:
+      hostNetwork: true
+      containers:
+        - name: dashboard
+          env:
+            - name: SSL_CERT_FILE
+              value: /etc/dex-ca/ca.crt
+          volumeMounts:
+            - name: dex-ca
+              mountPath: /etc/dex-ca
+              readOnly: true
+      volumes:
+        - name: dex-ca
+          configMap:
+            name: dex-ca
+'
+k -n kupra-system rollout status deployment/kupra-operator --timeout=180s
+k -n kupra-system rollout status deployment/kupra-dashboard --timeout=180s
+wait "$build_tests"
+wait "$install_browser"
 # Until the API server has loaded the Preview schema, the created-by admission policy rejects Previews.
 probe() {
   k create --dry-run=server -f - <<'PREVIEW'

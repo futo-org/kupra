@@ -21,3 +21,9 @@ for ns in $(k get namespaces -o name | grep -E "/e2e-"); do
     k -n "$ns" logs "$pod" --all-containers --tail=50
   done
 done
+echo "=== kupra-system/kupra-dashboard"
+k -n kupra-system logs deployment/kupra-dashboard --all-containers --tail=-1
+echo "=== dex/dex"
+k -n dex logs deployment/dex --tail=-1
+# CI uploads these traces and screenshots of failed dashboard tests.
+find .e2e/playwright -type f 2>/dev/null

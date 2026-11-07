@@ -8,5 +8,5 @@
     "allowImportingTsExtensions": true,
     "types": ["$app/types", "node"]
   },
-  "include": ["src", "scripts", "vite.config.ts", "eslint.config.js"]
+  "include": ["src", "scripts", "e2e", "playwright.config.ts", "vite.config.ts", "eslint.config.js"]
 }
