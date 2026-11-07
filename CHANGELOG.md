@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/futo-org/kupra/compare/v0.2.0...v0.3.0) (2026-11-07)
+
+
+### Features
+
+* add the dashboard ([#57](https://github.com/futo-org/kupra/issues/57)) ([23474b3](https://github.com/futo-org/kupra/commit/23474b3ecca1a4a0e58085c2ecbcc14d880b5f09))
+* label every object the chart templates, and validate the chart's values ([#47](https://github.com/futo-org/kupra/issues/47)) ([d03b6f1](https://github.com/futo-org/kupra/commit/d03b6f106f4f17338b48924cccae5500564c0b5d))
+* label the namespaces that contain PreviewApps ([#55](https://github.com/futo-org/kupra/issues/55)) ([091e416](https://github.com/futo-org/kupra/commit/091e41617aa768fccb8c05d0b87227befd0725eb))
+* report on each PreviewPolicy whether previews can use it ([#45](https://github.com/futo-org/kupra/issues/45)) ([1e05efc](https://github.com/futo-org/kupra/commit/1e05efcff1f2aea9d6ec1fe11091ce3fe56b7934))
+* show readiness and status in kubectl get ([#35](https://github.com/futo-org/kupra/issues/35)) ([405dc9c](https://github.com/futo-org/kupra/commit/405dc9c0447d1c1ec681931125d13be123ff6466))
+
+
+### Bug Fixes
+
+* create restored claims and clusters once their copies are bound ([#39](https://github.com/futo-org/kupra/issues/39)) ([b7761c6](https://github.com/futo-org/kupra/commit/b7761c640d8d683bfbb3a3456a85dd6e5f5b628a))
+* **dashboard:** show a new preview's actions to its owners, and hide namespaces without visible apps ([#61](https://github.com/futo-org/kupra/issues/61)) ([4baf1b7](https://github.com/futo-org/kupra/commit/4baf1b7cb8e144429b541b96121cbfa57902a6e3))
+* keep the app-namespace label empty ([#56](https://github.com/futo-org/kupra/issues/56)) ([639ee53](https://github.com/futo-org/kupra/commit/639ee5378b2dc3dfd3f1b6d2f9122589aa2489ef))
+* record a preview's generation as observed only once its owners are bound ([#62](https://github.com/futo-org/kupra/issues/62)) ([471dc7b](https://github.com/futo-org/kupra/commit/471dc7bccbfbc297a9f4b4f91a36000d0153f964))
+* report render errors as field errors ([#51](https://github.com/futo-org/kupra/issues/51)) ([a2a159c](https://github.com/futo-org/kupra/commit/a2a159c922214752ddb19cab49a454f810edc7d2))
+* say why in the Status column while capturing, deleting and resetting ([#41](https://github.com/futo-org/kupra/issues/41)) ([c6155f1](https://github.com/futo-org/kupra/commit/c6155f1057afc908c70063c668e6bbec1f0d8cb7))
+
 ## [0.2.0](https://github.com/futo-org/kupra/compare/v0.1.0...v0.2.0) (2026-11-06)
 
 
