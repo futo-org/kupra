@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Preview } from './kube/types.ts';
-import { isDeleted, previewOf, resetSource } from './model.ts';
+import { appGroups, isDeleted, previewOf, resetSource } from './model.ts';
 import { store } from './watch.svelte.ts';
 
 const preview = (name: string, app: string, restoreFrom?: Preview['spec']['restoreFrom']): Preview => ({
@@ -43,5 +43,34 @@ describe(isDeleted.name, () => {
     store.apply({ collection: 'previews/forbidden', type: 'ERROR', error: { code: 403, message: 'forbidden' } });
     expect(isDeleted('forbidden', 'gone')).toBe(false);
     expect(isDeleted('unwatched', 'gone')).toBe(false);
+  });
+});
+
+describe(appGroups.name, () => {
+  it('leaves out namespaces with no apps the user can see', () => {
+    for (const name of ['apps', 'forbidden-apps']) {
+      store.apply({ collection: 'app-namespaces', type: 'ADDED', object: { metadata: { name } } });
+    }
+    store.apply({ collection: 'app-namespaces', type: 'SYNCED' });
+    store.apply({
+      collection: 'previewapps/apps',
+      type: 'ADDED',
+      object: {
+        apiVersion: 'kupra.futo.tech/v1alpha1',
+        kind: 'PreviewApp',
+        metadata: { name: 'immich', namespace: 'apps' },
+        spec: { template: { resources: [] } },
+      },
+    });
+    store.apply({ collection: 'previewapps/apps', type: 'SYNCED' });
+    store.apply({
+      collection: 'previewapps/forbidden-apps',
+      type: 'ERROR',
+      error: { code: 403, message: 'forbidden' },
+    });
+
+    expect(appGroups().map(({ namespace, apps }) => [namespace, apps.map((app) => app.metadata?.name)])).toEqual([
+      ['apps', ['immich']],
+    ]);
   });
 });

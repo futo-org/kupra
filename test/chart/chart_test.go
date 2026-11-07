@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
 )
 
@@ -136,4 +138,50 @@ func TestDashboardRunsOnePod(t *testing.T) {
 		return
 	}
 	t.Error("the chart has no kupra-dashboard Deployment")
+}
+
+// The dashboard trusts the CA certificates in oidc.caConfigMap, at the path it mounts them.
+func TestDashboardTrustsCAConfigMap(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "with caConfigMap", args: append(dashboard, "--set", "dashboard.oidc.caConfigMap=private-ca"), want: true},
+		{name: "without", args: dashboard},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, u := range render(t, tc.args...) {
+				if u.GetKind() != "Deployment" || u.GetName() != "kupra-dashboard" {
+					continue
+				}
+				var d appsv1.Deployment
+				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &d); err != nil {
+					t.Fatal(err)
+				}
+				pod := d.Spec.Template.Spec
+				var caFile string
+				for _, arg := range pod.Containers[0].Args {
+					if v, ok := strings.CutPrefix(arg, "--oidc-ca-file="); ok {
+						caFile = v
+					}
+				}
+				if !tc.want {
+					if caFile != "" || len(pod.Volumes) > 0 {
+						t.Errorf("dashboard has --oidc-ca-file=%q and volumes %v without caConfigMap", caFile, pod.Volumes)
+					}
+					return
+				}
+				if len(pod.Volumes) != 1 || pod.Volumes[0].ConfigMap == nil || pod.Volumes[0].ConfigMap.Name != "private-ca" {
+					t.Fatalf("dashboard's volumes are %v, want ConfigMap private-ca", pod.Volumes)
+				}
+				mounts := pod.Containers[0].VolumeMounts
+				if len(mounts) != 1 || mounts[0].Name != pod.Volumes[0].Name || caFile != mounts[0].MountPath+"/ca.crt" {
+					t.Errorf("dashboard reads --oidc-ca-file=%q, but mounts %v", caFile, mounts)
+				}
+				return
+			}
+			t.Error("the chart has no kupra-dashboard Deployment")
+		})
+	}
 }

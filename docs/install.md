@@ -47,7 +47,7 @@ kubectl -n kupra-system create secret generic kupra-dashboard --from-literal=cli
 ```
 
 
-The issuer URL and client ID can go in the Secret too, as `issuer-url` and `client-id`, instead of the values below.
+The issuer URL and client ID can go in the Secret too, as `issuer-url` and `client-id`, instead of the values below. If the provider's certificate is from a private CA, put the CA's certificates in a ConfigMap's `ca.crt` and set `dashboard.oidc.caConfigMap` to its name. The dashboard trusts them for the provider only, and reads them when it starts.
 
 ```yaml
 dashboard:
