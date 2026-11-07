@@ -14,9 +14,6 @@ import (
 	kuprav1alpha1 "github.com/futo-org/kupra/api/v1alpha1"
 )
 
-// LabelHasApps marks the namespaces that contain PreviewApps, so the dashboard can find apps without reading every namespace's.
-const LabelHasApps = "kupra.futo.tech/has-apps"
-
 // AppNamespaceReconciler labels the namespaces that contain PreviewApps.
 type AppNamespaceReconciler struct {
 	client.Client
@@ -38,15 +35,15 @@ func (r *AppNamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 	hasApps := len(apps.Items) > 0
-	if _, labelled := ns.Labels[LabelHasApps]; labelled == hasApps {
+	if _, labelled := ns.Labels[kuprav1alpha1.LabelAppNamespace]; labelled == hasApps {
 		return ctrl.Result{}, nil
 	}
 	// A merge patch sets or removes just this label, whoever set it.
 	value := any(nil)
 	if hasApps {
-		value = "true"
+		value = ""
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": map[string]any{LabelHasApps: value}}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": map[string]any{kuprav1alpha1.LabelAppNamespace: value}}})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
