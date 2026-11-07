@@ -17,7 +17,7 @@ export default defineConfig(
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
       parserOptions: {
-        projectService: true,
+        projectService: { allowDefaultProject: ['static/*.js'] },
         extraFileExtensions: ['.svelte'],
         tsconfigRootDir: import.meta.dirname,
       },

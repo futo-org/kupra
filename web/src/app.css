@@ -2,5 +2,3 @@
 @import '@immich/ui/theme/default.css';
 
 @source "../node_modules/@immich/ui";
-
-@custom-variant dark (&:where(.dark, .dark *):not(.light));
