@@ -440,15 +440,23 @@ template:
 			if err := k8s.Get(ctx, client.ObjectKey{Name: nsName}, &ns); err != nil {
 				return err
 			}
-			var config corev1.ConfigMap
-			err := k8s.Get(ctx, client.ObjectKey{Namespace: nsName, Name: "config"}, &config)
-			switch {
-			case err == nil && !ns.DeletionTimestamp.IsZero():
-				t.Errorf("namespace is being deleted while ConfigMap config is still there, want the preview's resources deleted first")
-			case err == nil:
-				return fmt.Errorf("ConfigMap config is still there")
-			case !apierrors.IsNotFound(err):
-				return err
+			// The app and its retained state both go.
+			for _, r := range []struct {
+				kind string
+				obj  client.Object
+			}{
+				{"ConfigMap", &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: nsName, Name: "config"}}},
+				{"PersistentVolumeClaim", &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: nsName, Name: "data"}}},
+			} {
+				err := k8s.Get(ctx, client.ObjectKeyFromObject(r.obj), r.obj)
+				switch {
+				case err == nil && !ns.DeletionTimestamp.IsZero():
+					t.Errorf("namespace is being deleted while %s %s is still there, want the preview's resources deleted first", r.kind, r.obj.GetName())
+				case err == nil:
+					return fmt.Errorf("%s %s is still there", r.kind, r.obj.GetName())
+				case !apierrors.IsNotFound(err):
+					return err
+				}
 			}
 			return nil
 		})
