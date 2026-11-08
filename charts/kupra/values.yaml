@@ -97,6 +97,8 @@ dashboard:
     issuerURL: ""
     clientID: ""
     scopes: [openid, profile, email, groups, offline_access]
+    # A ConfigMap in the release's namespace whose ca.crt holds CA certificates to trust for the provider, besides the system's, such as a private CA's.
+    caConfigMap: ""
   # A Secret with the OIDC client's secret in client-secret. Session cookies are encrypted with keys derived from it, so rotating it and restarting the dashboard signs everyone out.
   existingSecret: ""
   image:
