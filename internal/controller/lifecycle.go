@@ -674,3 +674,24 @@ func (r *PreviewReconciler) heldSnapshot(ctx context.Context, p *kuprav1alpha1.P
 	}
 	return "", nil
 }
+
+// removeContent deletes the resources in inventory with applier, workloads before their state, and reports whether they're gone. Each resource the preview's account may no longer delete is left to the namespace's deletion, and the others still go.
+func (r *PreviewReconciler) removeContent(ctx context.Context, applier client.Client, namespace string, inventory []kuprav1alpha1.InventoryEntry) (bool, error) {
+	for _, entries := range [][]kuprav1alpha1.InventoryEntry{workloadEntries(inventory), stateEntries(inventory)} {
+		gone := true
+		for _, entry := range entries {
+			removed, err := r.remove(ctx, applier, namespace, []kuprav1alpha1.InventoryEntry{entry})
+			switch {
+			case apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err):
+			case err != nil:
+				return false, err
+			case !removed:
+				gone = false
+			}
+		}
+		if !gone {
+			return false, nil
+		}
+	}
+	return true, nil
+}
